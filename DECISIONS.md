@@ -33,6 +33,17 @@ because co-located tests are preferred. A full `apps/<name>` directory split —
 as unnecessary churn for a single-app repo; the tsconfig split alone achieves the actual
 goal (separating build/test/IaC compilation roots) without moving files.
 
+**Implementation note:** `tsc --build` hard-fails (`TS18003`) on a referenced project
+whose `include` matches zero files — it's an error, not a warning. `tsconfig.stacks.json`
+exists on disk (`include: ["sst.config.ts", "infra/**/*.ts"]`) but is deliberately left
+out of the root `tsconfig.json`'s `references` until task 7 adds a real `sst.config.ts`;
+wiring it in earlier would break `pnpm build` for every task in between. Root
+`tsconfig.json` currently references only `tsconfig.lib.json` and `tsconfig.test.json`.
+A shared `tsconfig.base.json` holds the common `compilerOptions` (this repo has no
+monorepo-level base to extend, unlike the multi-app setup this pattern is drawn from).
+`package.json`'s `build` script changed from `tsc` to `tsc --build` since the root
+config is now references-only (`files: []`) and has no `include` of its own.
+
 ## Infrastructure: SST v3 / Pulumi
 
 **Decision:** Use SST v3 for IaC.

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist/stacks",
+    "types": ["node"]
+  },
+  "include": ["sst.config.ts", "infra/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}

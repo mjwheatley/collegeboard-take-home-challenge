@@ -3,13 +3,16 @@
 Working list for implementing the decisions in `DECISIONS.md`. Check items off as they
 land; add new tasks as decisions are made rather than letting scope drift undocumented.
 
-- [ ] **1. tsconfig split**
-  - [ ] Replace `tsconfig.json` with a references-only file
-  - [ ] Add `tsconfig.lib.json` (Lambda source, excludes `*.test.ts`)
-  - [ ] Add `tsconfig.stacks.json` (`sst.config.ts` + IaC code)
-  - [ ] Add `tsconfig.test.json` (co-located `*.test.ts` files)
-  - [ ] Move `src/__tests__/example.test.ts` next to `src/handlers/example.ts`
-  - [ ] Update `vitest.config.ts` include pattern if needed
+- [x] **1. tsconfig split**
+  - [x] Replace `tsconfig.json` with a references-only file
+  - [x] Add `tsconfig.lib.json` (Lambda source, excludes `*.test.ts`)
+  - [x] Add `tsconfig.stacks.json` (`sst.config.ts` + IaC code) — on disk, not yet
+        wired into root `references` (empty `include` fails `tsc --build`; wire in
+        during task 7 once `sst.config.ts` exists)
+  - [x] Add `tsconfig.test.json` (co-located `*.test.ts` files)
+  - [x] Move `src/__tests__/example.test.ts` next to `src/handlers/example.ts`
+  - [x] Update `vitest.config.ts` include pattern if needed — not needed, default
+        glob already matches co-located `*.test.ts` anywhere
 
 - [ ] **2. Consolidate `src/types/item.ts` with Zod**
   - [ ] Single `ExamItemSchema` (Zod) as source of truth for `content`/`metadata` shapes
