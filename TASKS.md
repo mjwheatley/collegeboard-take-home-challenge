@@ -14,10 +14,15 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [x] Update `vitest.config.ts` include pattern if needed — not needed, default
         glob already matches co-located `*.test.ts` anywhere
 
-- [ ] **2. Consolidate `src/types/item.ts` with Zod**
-  - [ ] Single `ExamItemSchema` (Zod) as source of truth for `content`/`metadata` shapes
-  - [ ] `CreateItemRequest`/`UpdateItemRequest` as `.omit()`/`.partial()` derivatives
-  - [ ] Types derived via `z.infer`, drop hand-written interfaces
+- [x] **2. Consolidate `src/types/item.ts` with Zod**
+  - [x] Single `ExamItemSchema` (Zod) as source of truth for `content`/`metadata` shapes
+  - [x] `CreateItemRequest`/`UpdateItemRequest` as `.omit()`/`.partial()` derivatives
+  - [x] Types derived via `z.infer`, drop hand-written interfaces
+  - [x] `itemType`/`metadata.status`/`securityLevel` tightened to `z.enum(...)`,
+        `difficulty` bounded 1–5 — see "Consolidate `src/types/item.ts` with Zod" in
+        `DECISIONS.md` for why this went slightly beyond pure consolidation
+  - [x] `src/handlers/example.test.ts` fixtures needed `satisfies CreateItemRequest`
+        added (enum-typed fields need it to avoid TS widening object literals to `string`)
 
 - [ ] **3. Zod validation middleware**
   - [ ] Add Middy (`@middy/core`)

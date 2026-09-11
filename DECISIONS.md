@@ -98,6 +98,40 @@ separately hand-maintained interfaces.
 exactly the kind of drift Zod + `z.infer` prevents — one schema is the source of truth
 for both runtime validation and the compile-time type.
 
+**Implemented shape (`src/types/item.ts`):** `ExamItemSchema` is the base; nested
+`ExamItemContentSchema`/`ExamItemMetadataSchema` objects are defined once and reused.
+`CreateItemRequestSchema` = `ExamItemSchema.omit({ id, metadata }).extend({ metadata:
+<metadata omit created/lastModified/version> })` (those three are server-generated, not
+client-supplied). `UpdateItemRequestSchema` is built field-by-field rather than a plain
+`ExamItemSchema.omit({id:true}).partial()`, because a shallow `.partial()` would make
+`content`/`metadata` themselves optional but still require *all* of their nested fields
+whenever present — the original hand-written `UpdateItemRequest` allowed a partial
+`content`/`metadata` (e.g. update just `metadata.status`), so `content`/`metadata` are
+built as `<nested schema>.partial().optional()` to preserve that.
+
+**Scope decision beyond pure consolidation:** `itemType`, `metadata.status`, and
+`securityLevel` — previously typed as plain `string` despite the README documenting a
+fixed set of allowed values in comments — are now `z.enum(...)` of those documented
+values, and `difficulty` is now bounded `z.number().int().min(1).max(5)` instead of a
+bare `number`. This goes slightly beyond "consolidate duplicate shapes" into "add real
+validation," but it's exactly what the brief asks for ("proper error handling and
+validation") and costs nothing extra once the schema exists — leaving them as bare
+`string`/`number` would mean the Zod schema *looks* like validation without actually
+validating the one thing most likely to be wrong (a typo'd status/itemType value).
+`subject` stays a free-form string (open-ended: "AP Biology", "AP Calculus", etc. — not
+a fixed set).
+
+**Consequence:** `src/handlers/example.test.ts`'s inline test fixtures needed `satisfies
+CreateItemRequest` added — without it, TS widens object-literal string fields (e.g.
+`itemType: "multiple-choice"`) to plain `string` before checking them against the
+now-enum-typed parameter, and errors even though the literal value is valid.
+
+**Import style:** `import { object, string, number, enum as zodEnum, type z } from
+'zod'` (named function imports, `z` imported type-only for `z.infer`) instead of `import
+{ z } from 'zod'` + `z.object(...)`/`z.string()`. `enum` needs the `as zodEnum` alias
+since it's a reserved word. Array fields use `string().array()` (chained off the
+element schema) rather than a top-level `array(string())` import.
+
 ## Middleware
 
 **Decision:** Port a minimal middleware pattern seen in prior work — specifically Zod

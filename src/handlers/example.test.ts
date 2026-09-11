@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 
 import { createItemHandler, getItemHandler } from "./example.js";
 
+import type { CreateItemRequest } from "../types/item.js";
+
 describe("Example Handlers", () => {
   describe("createItemHandler", () => {
     it("should create an item successfully", async () => {
@@ -33,7 +35,7 @@ describe("Example Handlers", () => {
           tags: ["biology", "photosynthesis"],
         },
         securityLevel: "standard",
-      };
+      } satisfies CreateItemRequest;
 
       const result = await createItemHandler(itemData);
 
@@ -79,7 +81,7 @@ describe("Example Handlers", () => {
           tags: ["calculus", "derivatives"],
         },
         securityLevel: "standard",
-      };
+      } satisfies CreateItemRequest;
 
       const createResult = await createItemHandler(itemData);
 
