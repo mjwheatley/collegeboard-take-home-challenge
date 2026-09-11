@@ -51,11 +51,18 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [ ] Confirm `sst dev` covers the local dev loop
   - [ ] Delete `src/server.ts` and any now-unused local-server scaffolding/scripts
 
-- [ ] **9. ESLint config**
-  - [ ] Add `eslint.config.mjs`: `typescript-eslint` strict + stylistic type-checked base
-  - [ ] `import-x` ordering / no-extraneous-dependencies (test + `sst.config.ts` exceptions)
-  - [ ] `no-restricted-imports` (yup/lodash → prefer Zod)
-  - [ ] General style rules (padding-line-between-statements, id-length)
+- [x] **9. ESLint config + pre-commit hook**
+  - [x] Add `eslint.config.mjs`: `typescript-eslint` strict + stylistic type-checked base
+  - [x] `import-x` ordering / no-extraneous-dependencies (test + `sst.config.ts`/`eslint.config.mjs`/
+        `lint-staged.config.mjs` exceptions)
+  - [x] `no-restricted-imports` (yup/lodash → prefer Zod)
+  - [x] General style rules (padding-line-between-statements, id-length)
+  - [x] `husky` + `lint-staged`: pre-commit runs `eslint --fix` scoped to staged
+        `*.ts` files, plus whole-project `pnpm typecheck` and `pnpm test`
+  - Note: running `eslint .` now surfaces real pre-existing issues in
+    `src/server.ts`, `src/storage/*`, `src/handlers/example.ts` — left as-is
+    intentionally since those files are rewritten by tasks 2, 3, 6, 8; not
+    worth reformatting code about to be replaced
 
 - [ ] **10. Auth — Cognito (stretch, time-boxed; may remain deferred)**
   - [ ] Cognito User Pool in IaC

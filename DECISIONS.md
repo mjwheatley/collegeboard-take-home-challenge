@@ -189,13 +189,63 @@ audit trail output before auth lands as provisional.
 
 ## Linting
 
-**Decision:** Start from a known-good `typescript-eslint` flat-config baseline (strict +
-stylistic type-checked rules) and add just what this project needs — `import-x`
-ordering/no-extraneous-dependencies rules (with test/`sst.config.ts` exceptions),
-`no-restricted-imports` for yup/lodash → prefer Zod, and general style rules
-(padding-line-between-statements, id-length). Deliberately skipping monorepo/Nx-specific
-plugins, Next.js/React/Tailwind rules, and testing-library rules — none apply to this
-standalone Node/Lambda API project.
+**Decision:** `eslint.config.mjs` starts from a known-good `typescript-eslint`
+flat-config baseline (strict + stylistic type-checked rules via `projectService`) and
+adds just what this project needs — `import-x` ordering/no-extraneous-dependencies
+rules (with exceptions for `*.test.ts`, `sst.config.ts`, `eslint.config.mjs`,
+`lint-staged.config.mjs`, `vitest.config.ts`), `no-restricted-imports` for yup/lodash →
+prefer Zod, and general style rules (padding-line-between-statements, id-length).
+Deliberately skipping monorepo/Nx-specific plugins, Next.js/React/Tailwind rules, and
+testing-library rules — none apply to this standalone Node/Lambda API project.
+
+**Implementation notes:**
+- `createNodeResolver` lives in `eslint-plugin-import-x`, not
+  `eslint-import-resolver-typescript` (easy to mix up — both packages deal with import
+  resolution, but only `import-x` exports the plain-Node fallback resolver).
+- `tseslintConfigs.disableTypeChecked` is a single flat-config object in
+  `typescript-eslint@8.70.0`, not an array — a reference config written against an
+  older/different version treated it as one.
+- `noWarnOnMultipleProjects` (suppressing the "multiple projects found" console
+  warning) is an option on `createTypeScriptImportResolver(...)`
+  (`eslint-import-resolver-typescript`), not on typescript-eslint's own
+  `parserOptions.projectService` — despite both warning about the same "multiple
+  tsconfigs" situation, the option only exists on the resolver's config.
+- `eslint.config.mjs` and `lint-staged.config.mjs` are covered by
+  `parserOptions.projectService.allowDefaultProject` and a
+  `tseslintConfigs.disableTypeChecked` override (type-aware linting doesn't apply —
+  neither file is included in `tsconfig.lib.json`/`tsconfig.test.json`/
+  `tsconfig.stacks.json`).
+- Running `eslint .` immediately surfaces real, pre-existing issues in
+  `src/server.ts`, `src/storage/*.ts`, and `src/handlers/example.ts` (missing `await`,
+  `||` vs `??`, unused imports, etc.). Left alone deliberately — those files are
+  rewritten by tasks 2 (Zod types), 3 (validation middleware), 6 (single-table
+  DynamoDB), and 8 (removing `server.ts`), so reformatting them now would just be
+  thrown-away diff noise.
+
+## Pre-commit hooks
+
+**Decision:** `husky` (`prepare` script installs hooks) + `lint-staged`
+(`lint-staged.config.mjs`) on `pre-commit`. For staged `*.ts` files: `eslint --fix`
+scoped to just those files (lint-staged appends the staged filenames), then two
+whole-project checks regardless of which files matched — `pnpm typecheck`
+(`tsc --build`) and `pnpm test` (`vitest run`), invoked via the `package.json` scripts
+rather than raw CLI commands so there's one source of truth for those commands.
+
+**Rationale:** This is a single-package repo, not a monorepo — there's no `nx
+affected`-style project graph to scope typecheck/test to just the changed project, and
+tsc's project references / vitest's suite aren't meaningfully file-scoped here anyway,
+so those two run against the whole project on every commit rather than being filtered
+by filename.
+
+**Considered and rejected:** Routing `eslint --fix` through the `pnpm lint:fix` script
+instead of the raw `eslint --fix` binary — rejected because `pnpm lint:fix` runs
+`eslint . --fix` (the whole repo), so lint-staged's staged-filenames would just be
+appended as redundant extra args on top of an already-whole-repo lint. That would make
+every commit auto-fix (and potentially leave unstaged changes in) files that weren't
+even part of the commit. Kept `eslint --fix` as the one exception to "use package.json
+scripts" for this reason — it needs the staged filenames appended by lint-staged, which
+only happens for string commands, and scoping it to a script command loses that
+per-file targeting.
 
 ## Open questions / follow-ups
 
