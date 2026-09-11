@@ -214,18 +214,20 @@ otherwise) even though the outer `middy<...>()` call already states the same typ
 
 ## Data model: single-table design for versions + audit trail
 
-**Endpoint naming discrepancy:** The brief's route list has `POST /api/items/:id/versions`
-(create a version) but no matching `GET /api/items/:id/versions` — only
-`GET /api/items/:id/audit`. Taken literally, that means "audit" is the only read path for
-version history, which conflates two different concepts: *version history* ("what did
-this item look like at each point in time" — full snapshots) and *audit trail* ("who
-changed what, when" — a change log). If a plain array of version snapshots were wanted,
-the more RESTful shape would be `GET /api/items/:id/versions` (paginated the same way as
-`GET /api/items`), mirroring the `POST` route instead of overloading `/audit` for it.
-Since the brief only gives us `/audit`, that route is being treated as the change-log
-endpoint (see below) rather than a snapshot dump — noted here so the deviation from a
-literal reading of `getAuditTrail(): Promise<ExamItem[]>` is a documented choice, not an
-oversight.
+**Endpoint naming discrepancy — resolved by adding `GET /api/items/:id/versions`:** The
+brief's route list has `POST /api/items/:id/versions` (create a version) but no
+matching `GET /api/items/:id/versions` — only `GET /api/items/:id/audit`. Taken
+literally, that would make "audit" the only read path for version history, conflating
+two different concepts: *version history* ("what did this item look like at each point
+in time" — full snapshots) and *audit trail* ("who changed what, when" — a change log).
+Rather than pick one at the other's expense, both now exist as separate `ItemStorage`
+methods: `getAuditTrail(id)` (the change log, `AuditEntry[]`) stays behind `/audit`, and
+a new `listVersions(id, query)` — paginated the same way as `GET /api/items`, via the
+same `PaginationQuery` type — returns full `ExamItem[]` snapshots and is what
+`GET /api/items/:id/versions` (added to task 7's route list) will call. This also
+means the original literal reading of `getAuditTrail(): Promise<ExamItem[]>` is now
+satisfied too, just split across two purpose-built methods instead of one overloaded
+one.
 
 **Decision:** Single-table design. One table, `PK = itemId`, with `SK` prefixes
 distinguishing record kinds sharing that partition:
@@ -251,18 +253,69 @@ table) keeps the update transactional and same-table, and this is the same
 scoped to two record kinds instead of one — the natural single-table extension of that
 approach.
 
-**`AuditEntry` shape (initial):**
+**`AuditEntry` shape (`src/types/audit.ts`, implemented):**
 
 ```ts
 {
   itemId: string;
   version: number;
-  action: "created" | "updated";
+  action: "created" | "updated" | "version_created";
   changedBy: string;       // see auth note below — placeholder until real identity exists
   changedFields: string[]; // e.g. ["metadata.status", "content.correctAnswer"]
   timestamp: number;
 }
 ```
+
+`action` grew a third value beyond the original `"created" | "updated"` sketch:
+`"version_created"` maps 1:1 to the `createVersion` storage operation (the explicit
+`POST /api/items/:id/versions` bump — same item, no field changes, just a new version
+number), which is a distinct thing from `updateItem`'s `"updated"` (field changes,
+version bump as a side effect). Collapsing both into `"updated"` would make
+`changedFields: []` ambiguous (did nothing change, or did we just not compute the
+diff?) — a real audit-log consumer needs to tell those apart.
+
+**Implementation (`src/storage/`):**
+- `single-table-keys.ts` — `buildLatestKey`/`buildVersionKey`/`buildAuditKey` (zero-padded
+  version numbers so lexical sort matches numeric sort; audit keys prefixed with an ISO
+  timestamp so a `Query` returns them in chronological order) and `stripKeys` (drops
+  `PK`/`SK` before returning a record to callers).
+- `audit-diff.ts` — `diffExamItemFields(existing, data)`: compares only the fields
+  actually present in an `UpdateItemRequest` against the current item, and only flags a
+  field if the value actually differs (re-sending the same value isn't a "change").
+  Pure and unit-tested independent of any storage backend.
+- `dynamodb.ts` — every state-changing operation (`createItem`, `updateItem`,
+  `createVersion`) writes `latest` + the version snapshot + the audit entry via a single
+  `TransactWriteCommand`, so the three can never drift out of sync. `getItem` is a plain
+  `GetCommand` on `{PK: id, SK: 'latest'}` — O(1), no `Query` needed. `listVersions`/
+  `getAuditTrail` are single-partition `Query`s with `begins_with(SK, ...)`, sorted
+  newest-first (`ScanIndexForward: false`).
+- **Table schema change:** the physical primary key changes from a single `{ id }` hash
+  key to a composite `{ PK, SK }` hash+range key — this is what task 7's actual table
+  definition needs to match. `id` (the item id) is still stored as a regular attribute
+  on every record, just no longer *is* the key.
+- **`listItems` bug avoided, not just "changed":** every item is now 3 physical rows
+  (latest/version/audit) sharing a partition instead of 1. The original `Scan` +
+  `Limit` + `Count` approach would have been actively wrong here — `Limit` caps items
+  *read* per page before `FilterExpression` runs, and `Count` reflects post-filter
+  matches *within that page only*, so a table where 2/3 of rows are non-`latest` could
+  return a `total` far lower than reality, or zero items on a page that happened to
+  scan mostly `VERSION#`/`AUDIT#` rows. Fixed by paging through `Scan` (bounded by
+  `MAX_LIST_SCAN_PAGES`, since this is a full scan, not a `Query`) collecting all
+  filter-matching `latest` records first, then paginating client-side — correct
+  `total`, at the cost of scanning more than strictly necessary. The code's own
+  comment (carried over from the original) still says what the real fix is: a `Query`
+  against a GSI keyed by `subject`/`status`, out of scope here.
+- **`MemoryStorage` asymmetry with `DynamoDBStorage`:** `MemoryStorage` keeps a
+  `versions: Map<string, ExamItem[]>` (full snapshots, mirroring `VERSION#` records)
+  now that `listVersions` actually reads one — this was previously simplified away
+  (see the task 3 commit) back when nothing in the interface consumed it.
+- **Tests:** `audit-diff.test.ts`, `single-table-keys.test.ts` (pure logic, no AWS).
+  `dynamodb.test.ts` uses `aws-sdk-client-mock` (`mockClient(DynamoDBDocumentClient)`)
+  to assert on the actual `TransactWriteCommand`/`GetCommand`/`QueryCommand`/
+  `ScanCommand` shapes sent — e.g. that `createItem` sends exactly 3 `TransactItems`
+  with the right `SK`s, and `updateItem`'s audit entry has the right `changedFields`.
+  This is the first place AWS SDK call shapes are actually exercised, rather than just
+  typechecked.
 
 ## Authentication (deferred)
 

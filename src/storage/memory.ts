@@ -7,13 +7,31 @@
 
 import { randomUUID } from 'crypto';
 
-import { ExamItem, CreateItemRequest, UpdateItemRequest, ListItemsQuery } from '../types/item.js';
+import { ExamItem, CreateItemRequest, UpdateItemRequest, ListItemsQuery, PaginationQuery } from '../types/item.js';
 
+import { diffExamItemFields } from './audit-diff.js';
 import { ItemStorage } from './interface.js';
+
+import type { AuditEntry } from '../types/audit.js';
 
 export class MemoryStorage implements ItemStorage {
   private items = new Map<string, ExamItem>();
   private versions = new Map<string, ExamItem[]>();
+  private auditLog = new Map<string, AuditEntry[]>();
+
+  private recordVersionSnapshot(snapshot: ExamItem): void {
+    const snapshots = this.versions.get(snapshot.id) ?? [];
+
+    snapshots.push(snapshot);
+    this.versions.set(snapshot.id, snapshots);
+  }
+
+  private recordAuditEntry(entry: AuditEntry): void {
+    const entries = this.auditLog.get(entry.itemId) ?? [];
+
+    entries.push(entry);
+    this.auditLog.set(entry.itemId, entries);
+  }
 
   async createItem(data: CreateItemRequest): Promise<ExamItem> {
     const now = Date.now();
@@ -29,7 +47,15 @@ export class MemoryStorage implements ItemStorage {
     };
 
     this.items.set(item.id, item);
-    this.versions.set(item.id, [{ ...item }]);
+    this.recordVersionSnapshot(item);
+    this.recordAuditEntry({
+      itemId: item.id,
+      version: 1,
+      action: 'created',
+      changedBy: item.metadata.author,
+      changedFields: [],
+      timestamp: now,
+    });
 
     return item;
   }
@@ -43,6 +69,8 @@ export class MemoryStorage implements ItemStorage {
 
     if (!item) return null;
 
+    const changedFields = diffExamItemFields(item, data);
+    const now = Date.now();
     const updated: ExamItem = {
       ...item,
       ...data,
@@ -50,18 +78,21 @@ export class MemoryStorage implements ItemStorage {
       metadata: {
         ...item.metadata,
         ...(data.metadata ?? {}),
-        lastModified: Date.now(),
+        lastModified: now,
         version: item.metadata.version + 1,
       },
     };
 
     this.items.set(id, updated);
-
-    // Save version history
-    const history = this.versions.get(id) ?? [];
-
-    history.push({ ...updated });
-    this.versions.set(id, history);
+    this.recordVersionSnapshot(updated);
+    this.recordAuditEntry({
+      itemId: id,
+      version: updated.metadata.version,
+      action: 'updated',
+      changedBy: data.metadata?.author ?? item.metadata.author,
+      changedFields,
+      timestamp: now,
+    });
 
     return updated;
   }
@@ -71,12 +102,12 @@ export class MemoryStorage implements ItemStorage {
 
     // Filter by subject
     if (query.subject) {
-      items = items.filter(item => item.subject === query.subject);
+      items = items.filter((item) => item.subject === query.subject);
     }
 
     // Filter by status
     if (query.status) {
-      items = items.filter(item => item.metadata.status === query.status);
+      items = items.filter((item) => item.metadata.status === query.status);
     }
 
     const total = items.length;
@@ -95,27 +126,41 @@ export class MemoryStorage implements ItemStorage {
 
     if (!item) return null;
 
-    // Create a new version (copy of current state)
+    const now = Date.now();
+
+    // Create a new version (copy of current state, no field changes)
     const newVersion: ExamItem = {
       ...item,
       metadata: {
         ...item.metadata,
         version: item.metadata.version + 1,
-        lastModified: Date.now(),
+        lastModified: now,
       },
     };
 
     this.items.set(id, newVersion);
-
-    const history = this.versions.get(id) ?? [];
-
-    history.push({ ...newVersion });
-    this.versions.set(id, history);
+    this.recordVersionSnapshot(newVersion);
+    this.recordAuditEntry({
+      itemId: id,
+      version: newVersion.metadata.version,
+      action: 'version_created',
+      changedBy: item.metadata.author,
+      changedFields: [],
+      timestamp: now,
+    });
 
     return newVersion;
   }
 
-  async getAuditTrail(id: string): Promise<ExamItem[]> {
-    return this.versions.get(id) ?? [];
+  async listVersions(id: string, query: PaginationQuery): Promise<{ items: ExamItem[]; total: number }> {
+    const snapshots = [...(this.versions.get(id) ?? [])].reverse();
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 10;
+
+    return { items: snapshots.slice(offset, offset + limit), total: snapshots.length };
+  }
+
+  async getAuditTrail(id: string): Promise<AuditEntry[]> {
+    return [...(this.auditLog.get(id) ?? [])].reverse();
   }
 }

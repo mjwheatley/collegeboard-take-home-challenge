@@ -56,18 +56,37 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         bundled into Lambdas); `tsconfig.stacks.json` now has real files so it's
         wired into the root `tsconfig.json` references ahead of schedule
 
-- [ ] **6. Single-table DynamoDB design**
-  - [ ] Composite key: `PK = itemId`, `SK` prefixes (`latest`, `VERSION#000N`, `AUDIT#<ts>#000N`)
-  - [ ] `updateItem`: `TransactWriteItems` writing `latest` + `VERSION#` snapshot + `AUDIT#` entry atomically
-  - [ ] `createVersion` / `getAuditTrail` implemented against the new key design
-  - [ ] `getAuditTrail` return type changes `ExamItem[] → AuditEntry[]` (update `ItemStorage` interface)
-  - [ ] `AuditEntry` type (`itemId`, `version`, `action`, `changedBy`, `changedFields`, `timestamp`)
-  - [ ] Field-diffing for `changedFields` (top-level fields: `subject`, `itemType`, `difficulty`, `content.*`, `metadata.status`, `metadata.tags`, `securityLevel`)
+- [x] **6. Single-table DynamoDB design**
+  - [x] Composite key: `PK = itemId`, `SK` prefixes (`latest`, `VERSION#000N`, `AUDIT#<ts>#000N`)
+        — `src/storage/single-table-keys.ts` (+ test)
+  - [x] `updateItem`/`createItem`/`createVersion`: `TransactWriteCommand` writing
+        `latest` + `VERSION#` snapshot + `AUDIT#` entry atomically
+  - [x] `createVersion` / `getAuditTrail` implemented against the new key design
+  - [x] `getAuditTrail` return type changes `ExamItem[] → AuditEntry[]` (update `ItemStorage` interface)
+  - [x] `AuditEntry` type (`itemId`, `version`, `action`, `changedBy`, `changedFields`,
+        `timestamp`) — `action` grew a third value, `version_created`, beyond the
+        original `created | updated` sketch (see `DECISIONS.md`)
+  - [x] Field-diffing for `changedFields` — `src/storage/audit-diff.ts` (+ test),
+        only flags fields the request actually changes vs. the existing value
+  - [x] **Added mid-task:** `listVersions(id, query)` on `ItemStorage` — paginated
+        (same `PaginationQuery` as `listItems`) full `ExamItem[]` version history,
+        resolving the `/audit` vs. `/versions` naming discrepancy noted earlier
+        (see "Endpoint naming discrepancy — resolved" in `DECISIONS.md`). Implemented
+        in both `MemoryStorage` (re-added a version-snapshot map) and `DynamoDBStorage`
+        (single-partition `Query` on `VERSION#`).
+  - [x] Fixed a real bug `listItems` would otherwise have shipped with: every item is
+        now 3 physical rows, so the old `Scan` + `Limit` + `Count` approach would
+        badly miscount/under-return. Now pages through `Scan` collecting all
+        `latest`-record matches before paginating client-side.
+  - [x] `dynamodb.test.ts` added using `aws-sdk-client-mock` — first place the actual
+        AWS SDK call shapes (not just types) are exercised
 
 - [ ] **7. SST v3 setup**
   - [ ] `sst.config.ts`
-  - [ ] DynamoDB table component (single-table design)
-  - [ ] Lambda function(s) + API Gateway routes for the 6 endpoints
+  - [ ] DynamoDB table component (single-table design) — composite key `{ PK, SK }`,
+        not the original single `{ id }` key (see task 6 / `DECISIONS.md`)
+  - [ ] Lambda function(s) + API Gateway routes for the 7 endpoints (6 from the brief
+        + `GET /api/items/:id/versions`, added in task 6 — see `DECISIONS.md`)
   - [ ] Function-defaults environment wiring (table name/endpoint/region) via SST, not per-function
   - [ ] Per-stage config wired in via `StackConfiguration` (task 5)
 

@@ -1,7 +1,12 @@
 /**
  * DynamoDB Storage Implementation (Optional)
  *
- * This implementation uses AWS DynamoDB for persistent storage.
+ * Single-table design: partition key `PK` is the item id, sort key `SK` distinguishes
+ * the record kind sharing that partition (`latest`, `VERSION#<n>`, `AUDIT#<ts>#<n>`)
+ * — see `single-table-keys.ts`. Every write that changes an item's state (create,
+ * update, explicit version bump) writes all three records atomically via
+ * `TransactWriteCommand`, so `latest`/the version snapshot/the audit entry can never
+ * drift out of sync with each other.
  *
  * To use this:
  * 1. Set environment variable: USE_DYNAMODB=true
@@ -17,11 +22,31 @@
 import { randomUUID } from 'crypto';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand, ScanCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 
-import { ExamItem, CreateItemRequest, UpdateItemRequest, ListItemsQuery } from '../types/item.js';
+import { ExamItem, CreateItemRequest, UpdateItemRequest, ListItemsQuery, PaginationQuery } from '../types/item.js';
 
+import { diffExamItemFields } from './audit-diff.js';
 import { ItemStorage } from './interface.js';
+import {
+  AUDIT_SK_PREFIX,
+  LATEST_SK,
+  VERSION_SK_PREFIX,
+  buildAuditKey,
+  buildLatestKey,
+  buildVersionKey,
+  stripKeys,
+} from './single-table-keys.js';
+
+import type { AuditEntry } from '../types/audit.js';
+
+// Scan's FilterExpression is applied after Limit is applied per page, so a single
+// Scan call can under-return matching items even when more exist. This bounds how
+// many pages listItems will page through rather than looping indefinitely against a
+// pathological filter -- not a hard correctness guarantee for very large tables, but
+// this is already a "Query with a GSI" problem in a real production table (see the
+// note on listItems below).
+const MAX_LIST_SCAN_PAGES = 20;
 
 export class DynamoDBStorage implements ItemStorage {
   private client: DynamoDBDocumentClient;
@@ -50,21 +75,37 @@ export class DynamoDBStorage implements ItemStorage {
       },
     };
 
-    await this.client.send(new PutCommand({
-      TableName: this.tableName,
-      Item: item,
-    }));
+    const auditEntry: AuditEntry = {
+      itemId: item.id,
+      version: 1,
+      action: 'created',
+      changedBy: item.metadata.author,
+      changedFields: [],
+      timestamp: now,
+    };
+
+    await this.client.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(item.id), ...item } } },
+          { Put: { TableName: this.tableName, Item: { ...buildVersionKey(item.id, 1), ...item } } },
+          { Put: { TableName: this.tableName, Item: { ...buildAuditKey(item.id, now, 1), ...auditEntry } } },
+        ],
+      }),
+    );
 
     return item;
   }
 
   async getItem(id: string): Promise<ExamItem | null> {
-    const result = await this.client.send(new GetCommand({
-      TableName: this.tableName,
-      Key: { id },
-    }));
+    const result = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: buildLatestKey(id),
+      }),
+    );
 
-    return (result.Item as ExamItem | undefined) ?? null;
+    return result.Item ? stripKeys<ExamItem>(result.Item) : null;
   }
 
   async updateItem(id: string, data: UpdateItemRequest): Promise<ExamItem | null> {
@@ -72,6 +113,8 @@ export class DynamoDBStorage implements ItemStorage {
 
     if (!existing) return null;
 
+    const changedFields = diffExamItemFields(existing, data);
+    const now = Date.now();
     const updated: ExamItem = {
       ...existing,
       ...data,
@@ -79,41 +122,179 @@ export class DynamoDBStorage implements ItemStorage {
       metadata: {
         ...existing.metadata,
         ...(data.metadata ?? {}),
-        lastModified: Date.now(),
+        lastModified: now,
         version: existing.metadata.version + 1,
       },
     };
 
-    await this.client.send(new PutCommand({
-      TableName: this.tableName,
-      Item: updated,
-    }));
+    const auditEntry: AuditEntry = {
+      itemId: id,
+      version: updated.metadata.version,
+      action: 'updated',
+      changedBy: data.metadata?.author ?? existing.metadata.author,
+      changedFields,
+      timestamp: now,
+    };
+
+    await this.client.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(id), ...updated } } },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildVersionKey(id, updated.metadata.version), ...updated },
+            },
+          },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildAuditKey(id, now, updated.metadata.version), ...auditEntry },
+            },
+          },
+        ],
+      }),
+    );
 
     return updated;
   }
 
+  /**
+   * Basic Scan-based implementation. Every item now has 3 physical rows sharing a
+   * partition (latest/version/audit), so Limit can't be passed straight through --
+   * it would count the wrong rows and could return zero matches on a page full of
+   * VERSION#/AUDIT# records even when matching items exist elsewhere in the table.
+   * Pages through Scan (bounded by MAX_LIST_SCAN_PAGES) collecting only `latest`
+   * records that pass the filters, then paginates client-side. For a real production
+   * table, this should be a Query against a GSI keyed by subject/status instead.
+   */
   async listItems(query: ListItemsQuery): Promise<{ items: ExamItem[]; total: number }> {
-    // Note: This is a basic implementation using Scan
-    // For production, you should use Query with appropriate indexes
-    const result = await this.client.send(new ScanCommand({
-      TableName: this.tableName,
-      Limit: query.limit ?? 10,
-    }));
+    const filterParts = ['SK = :sk'];
+    const expressionAttributeValues: Record<string, unknown> = { ':sk': LATEST_SK };
+    const expressionAttributeNames: Record<string, string> = {};
 
-    const items = (result.Items ?? []) as ExamItem[];
+    if (query.subject) {
+      filterParts.push('subject = :subject');
+      expressionAttributeValues[':subject'] = query.subject;
+    }
 
-    return { items, total: result.Count ?? 0 };
+    if (query.status) {
+      filterParts.push('metadata.#status = :status');
+      expressionAttributeNames['#status'] = 'status';
+      expressionAttributeValues[':status'] = query.status;
+    }
+
+    const matched: ExamItem[] = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+    let scanPages = 0;
+
+    do {
+      const result = await this.client.send(
+        new ScanCommand({
+          TableName: this.tableName,
+          FilterExpression: filterParts.join(' AND '),
+          ExpressionAttributeValues: expressionAttributeValues,
+          ExpressionAttributeNames: Object.keys(expressionAttributeNames).length
+            ? expressionAttributeNames
+            : undefined,
+          ExclusiveStartKey: exclusiveStartKey,
+        }),
+      );
+
+      matched.push(...(result.Items ?? []).map((item) => stripKeys<ExamItem>(item)));
+      exclusiveStartKey = result.LastEvaluatedKey;
+      scanPages += 1;
+    } while (exclusiveStartKey && scanPages < MAX_LIST_SCAN_PAGES);
+
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 10;
+
+    return { items: matched.slice(offset, offset + limit), total: matched.length };
   }
 
-  createVersion(_id: string): Promise<ExamItem | null> {
-    // TODO: Implement versioning strategy
-    // Options: Separate versions table, same table with sort key, etc.
-    throw new Error('Not implemented - define your versioning strategy');
+  async createVersion(id: string): Promise<ExamItem | null> {
+    const existing = await this.getItem(id);
+
+    if (!existing) return null;
+
+    const now = Date.now();
+    const newVersion: ExamItem = {
+      ...existing,
+      metadata: {
+        ...existing.metadata,
+        version: existing.metadata.version + 1,
+        lastModified: now,
+      },
+    };
+
+    const auditEntry: AuditEntry = {
+      itemId: id,
+      version: newVersion.metadata.version,
+      action: 'version_created',
+      changedBy: existing.metadata.author,
+      changedFields: [],
+      timestamp: now,
+    };
+
+    await this.client.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(id), ...newVersion } } },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildVersionKey(id, newVersion.metadata.version), ...newVersion },
+            },
+          },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildAuditKey(id, now, newVersion.metadata.version), ...auditEntry },
+            },
+          },
+        ],
+      }),
+    );
+
+    return newVersion;
   }
 
-  getAuditTrail(_id: string): Promise<ExamItem[]> {
-    // TODO: Implement audit trail retrieval
-    // This depends on your versioning strategy
-    throw new Error('Not implemented - define your audit trail strategy');
+  /**
+   * Queries a single partition's VERSION# records, newest first, then paginates
+   * client-side. Unlike listItems, this is a single-partition Query (not a
+   * cross-partition Scan), so it doesn't need the multi-page loop -- a Query already
+   * returns matching sort keys efficiently and in order; the only remaining gap is
+   * that a version history larger than 1MB of results would need LastEvaluatedKey
+   * pagination too, which isn't handled here (an item would need thousands of
+   * versions to hit that).
+   */
+  async listVersions(id: string, query: PaginationQuery): Promise<{ items: ExamItem[]; total: number }> {
+    const result = await this.client.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+        ExpressionAttributeValues: { ':pk': id, ':prefix': VERSION_SK_PREFIX },
+        ScanIndexForward: false, // newest first
+      }),
+    );
+
+    const snapshots = (result.Items ?? []).map((item) => stripKeys<ExamItem>(item));
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 10;
+
+    return { items: snapshots.slice(offset, offset + limit), total: snapshots.length };
+  }
+
+  async getAuditTrail(id: string): Promise<AuditEntry[]> {
+    const result = await this.client.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+        ExpressionAttributeValues: { ':pk': id, ':prefix': AUDIT_SK_PREFIX },
+        ScanIndexForward: false, // newest first
+      }),
+    );
+
+    return (result.Items ?? []).map((item) => stripKeys<AuditEntry>(item));
   }
 }

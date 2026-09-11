@@ -69,9 +69,14 @@ export const UpdateItemRequestSchema = object({
 
 export type UpdateItemRequest = z.infer<typeof UpdateItemRequestSchema>;
 
-export const ListItemsQuerySchema = object({
+export const PaginationQuerySchema = object({
   limit: number().int().positive().optional(),
   offset: number().int().min(0).optional(),
+});
+
+export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
+
+export const ListItemsQuerySchema = PaginationQuerySchema.extend({
   subject: string().optional(),
   status: ItemStatusSchema.optional(),
 });
