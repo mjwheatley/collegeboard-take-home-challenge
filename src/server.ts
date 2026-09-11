@@ -10,6 +10,11 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { getItemHandler, createItemHandler } from './handlers/example.js';
 
 import type { CreateItemRequest } from './types/item.js';
+import type { Context } from 'aws-lambda';
+
+// Middy handlers are typed as (event, context) => Promise<TResult>; this local dev
+// server has no real Lambda context, so an empty stub stands in for one.
+const noopContext = {} as Context;
 
 const PORT = Number(process.env.PORT ?? 3000);
 
@@ -45,14 +50,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Example routes - implement your own routing logic
     if (method === 'GET' && url === '/api/items/test') {
-      result = await getItemHandler('test');
+      result = await getItemHandler({ id: 'test' }, noopContext);
     } else if (method === 'POST' && url === '/api/items') {
-      // TODO: Validate parsedBody with Zod instead of trusting the client (see task 3)
-      result = await createItemHandler(parsedBody as CreateItemRequest);
+      // Zod validation happens inside createItemHandler (see zodValidatorMiddleware);
+      // the cast just satisfies the compiler ahead of that runtime check.
+      result = await createItemHandler(parsedBody as CreateItemRequest, noopContext);
     } else if (method === 'GET' && url?.startsWith('/api/items/')) {
       const id = url.split('/').pop();
 
-      result = id ? await getItemHandler(id) : { statusCode: 400, body: { error: 'Missing item id' } };
+      result = id
+        ? await getItemHandler({ id }, noopContext)
+        : { statusCode: 400, body: { error: 'Missing item id' } };
     } else {
       result = {
         statusCode: 404,

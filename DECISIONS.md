@@ -143,6 +143,50 @@ infrastructure this project doesn't have (observability tooling, feature-flag se
 Zod validation middleware is directly reusable in shape; other cross-cutting concerns
 (observability, feature flags) are out of scope here.
 
+**Implemented shape (`src/middleware/zodValidatorMiddleware.ts`):** Generic over
+`<TEvent, TResult>`; `before` replaces `request.event` with `requestSchema.parse(...)`,
+`after` replaces `request.response` with `responseSchema.parse(...)` when a response
+exists. A failing `.parse()` throws a `ZodError`, which Middy propagates as the
+handler's error like any other thrown error — no special error-formatting was added,
+since this project has no HTTP layer yet to decide how a `ZodError` should map to a
+status code (that's a task 7 concern, once real API Gateway routes exist).
+
+**Event-shape boundary (important, and worth getting right before task 7):** Wiring
+Middy onto a handler forces a decision about what "the event" actually is, and this
+project isn't deployed yet — there's no real API Gateway event to validate. Rather than
+guess at API Gateway's HTTP API v2 payload shape now, `getItemHandler`'s and
+`createItemHandler`'s Middy "event" is the **already-normalized domain payload** —
+`{ id: string }` for a get-by-id, the `CreateItemRequest` fields directly for create —
+not a raw `APIGatewayProxyEventV2`. This means `getItemHandler`'s signature changed
+from `(id: string)` to `(event: { id: string }, context)`, and callers changed
+accordingly (see below). Task 7 will decide the real mapping from an API Gateway event
+to this shape (most likely a small adapter middleware in front of
+`zodValidatorMiddleware` in the chain — e.g. extracting `pathParameters`/parsed `body`
+into this normalized object — rather than reshaping these handlers again).
+
+**Response schemas are exact per-status-code, not a loose `number()` catch-all:** e.g.
+`getItemResponseSchema` is a `union` of `{statusCode: literal(200), body: ExamItemSchema}
+| {statusCode: literal(404), body: errorBodySchema} | {statusCode: literal(500),
+body: errorBodySchema}` — mirroring the handler's actual return type exactly, rather
+than `{statusCode: number(), body: errorBodySchema}` as a generic error branch. This
+isn't just precision for its own sake: `zodValidatorMiddleware`'s generic
+`responseSchema: ZodType<TResult>` means the schema's inferred output type has to be
+structurally assignable to the handler's actual `TResult` (`Awaited<ReturnType<typeof
+getItem>>`) for the code to typecheck — a generic `number()` branch is *wider* than the
+literal `404 | 500` the function actually returns, so it wouldn't be assignable back
+into `TResult` on `request.response = responseSchema.parse(...)`.
+
+**Consequence — call-site signature changes:** `getItemHandler`/`createItemHandler` now
+take `(event, context)` instead of a bare value, since Middy's `MiddyfiedHandler` type
+requires both. `src/server.ts` and `src/handlers/example.test.ts` pass a stub
+`{} as Context` (from `@types/aws-lambda`, added as a dev dependency purely because
+`@middy/core`'s own type definitions import `Context`/`Handler` from the `aws-lambda`
+module) since neither has a real Lambda context to supply. `middy<TEvent, TResult>(...)`'s
+generics don't get inferred from a bare arrow function due to its multi-overload
+signature (`LambdaHandler | MiddlewareHandler | PluginObject`), so the inner handler
+function's parameter needed an explicit type annotation in a few spots (`TS7006`
+otherwise) even though the outer `middy<...>()` call already states the same type.
+
 ## Data model: single-table design for versions + audit trail
 
 **Endpoint naming discrepancy:** The brief's route list has `POST /api/items/:id/versions`

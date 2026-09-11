@@ -14,6 +14,9 @@ importers:
       '@aws-sdk/lib-dynamodb':
         specifier: ^3.600.0
         version: 3.932.0(@aws-sdk/client-dynamodb@3.932.0)
+      '@middy/core':
+        specifier: ^7.9.2
+        version: 7.9.2
       uuid:
         specifier: ^10.0.0
         version: 10.0.0
@@ -24,6 +27,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.10.0)
+      '@types/aws-lambda':
+        specifier: ^8.10.163
+        version: 8.10.163
       '@types/node':
         specifier: ^20.14.9
         version: 20.19.25
@@ -576,6 +582,19 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
+  '@middy/core@7.9.2':
+    resolution: {integrity: sha512-3VJ8m6KjGyMMHjgbmAxHai8f97VOU71XTyjFI+lnLqC0Dng+5zxXfuagFXUQTHRL2xj16p+mKmWtbTnxkwF5zw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@aws/durable-execution-sdk-js': ^2.0.0
+    peerDependenciesMeta:
+      '@aws/durable-execution-sdk-js':
+        optional: true
+
+  '@middy/util@7.9.2':
+    resolution: {integrity: sha512-H2NDN08V2LKk04mnEOH0PMuSTckKpbYXamL2BsGP/QigQx0uXKaVISVK9/DLLEp3VxJofBTTBXK1QT0lypm8gg==}
+    engines: {node: '>=22'}
+
   '@napi-rs/wasm-runtime@1.2.4':
     resolution: {integrity: sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=23.5.0}
@@ -874,6 +893,9 @@ packages:
 
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
+
+  '@types/aws-lambda@8.10.163':
+    resolution: {integrity: sha512-+4zuoEB3S8RIhimtOFT7zAEk2SbpwrKjjGl9CyYnQR6k08uynxfauIIB0pDU1ssr05F8oyGiETwpn+8eXZMqPw==}
 
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
@@ -2298,6 +2320,12 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
+  '@middy/core@7.9.2':
+    dependencies:
+      '@middy/util': 7.9.2
+
+  '@middy/util@7.9.2': {}
+
   '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
       '@emnapi/core': 1.10.0
@@ -2657,6 +2685,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@types/aws-lambda@8.10.163': {}
 
   '@types/esrecurse@4.3.1': {}
 

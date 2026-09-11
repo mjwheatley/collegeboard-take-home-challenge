@@ -35,3 +35,6 @@ yarn-error.log*
 
 # Testing
 coverage/
+
+# Personal (not part of the submission)
+TIME_LOG.md

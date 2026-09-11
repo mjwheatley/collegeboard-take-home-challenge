@@ -15,6 +15,9 @@ import { describe, expect, it } from "vitest";
 import { createItemHandler, getItemHandler } from "./example.js";
 
 import type { CreateItemRequest } from "../types/item.js";
+import type { Context } from "aws-lambda";
+
+const noopContext = {} as Context;
 
 describe("Example Handlers", () => {
   describe("createItemHandler", () => {
@@ -37,7 +40,7 @@ describe("Example Handlers", () => {
         securityLevel: "standard",
       } satisfies CreateItemRequest;
 
-      const result = await createItemHandler(itemData);
+      const result = await createItemHandler(itemData, noopContext);
 
       expect(result.statusCode).toBe(201);
       expect(result.body).toHaveProperty("id");
@@ -54,7 +57,7 @@ describe("Example Handlers", () => {
 
   describe("getItemHandler", () => {
     it("should return 404 for non-existent item", async () => {
-      const result = await getItemHandler("non-existent-id");
+      const result = await getItemHandler({ id: "non-existent-id" }, noopContext);
 
       expect(result.statusCode).toBe(404);
       expect(result.body).toHaveProperty("error");
@@ -83,7 +86,7 @@ describe("Example Handlers", () => {
         securityLevel: "standard",
       } satisfies CreateItemRequest;
 
-      const createResult = await createItemHandler(itemData);
+      const createResult = await createItemHandler(itemData, noopContext);
 
       expect(createResult.body).toHaveProperty("id");
 
@@ -94,7 +97,7 @@ describe("Example Handlers", () => {
       const itemId = createResult.body.id;
 
       // Then retrieve it
-      const getResult = await getItemHandler(itemId);
+      const getResult = await getItemHandler({ id: itemId }, noopContext);
 
       expect(getResult.statusCode).toBe(200);
       expect(getResult.body).toHaveProperty("id", itemId);

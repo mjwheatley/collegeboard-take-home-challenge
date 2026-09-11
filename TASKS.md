@@ -24,10 +24,18 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [x] `src/handlers/example.test.ts` fixtures needed `satisfies CreateItemRequest`
         added (enum-typed fields need it to avoid TS widening object literals to `string`)
 
-- [ ] **3. Zod validation middleware**
-  - [ ] Add Middy (`@middy/core`)
-  - [ ] Small `zodValidatorMiddleware` (request + response schema validation)
-  - [ ] Wire into handlers
+- [x] **3. Zod validation middleware**
+  - [x] Add Middy (`@middy/core`); also `@types/aws-lambda` (dev) since `@middy/core`'s
+        own types import `Context`/`Handler` from `aws-lambda`
+  - [x] Small `zodValidatorMiddleware` (request + response schema validation) +
+        `zodValidatorMiddleware.test.ts`
+  - [x] Wire into `getItemHandler`/`createItemHandler` — changed their public signature
+        to `(event, context)`; `event` is the normalized domain payload (`{ id }` /
+        `CreateItemRequest`), not a raw API Gateway event — see "Event-shape boundary"
+        under "Middleware" in `DECISIONS.md` for why, and what task 7 still needs to
+        decide (the real API-Gateway-event → this-shape mapping)
+  - [x] Updated `src/server.ts` and `src/handlers/example.test.ts` call sites for the
+        new `(event, context)` signature (stub `{} as Context`)
 
 - [ ] **4. `AccountStage` + stage resolution**
   - [ ] Local `AccountStage` enum: `Development | Staging | Production`
