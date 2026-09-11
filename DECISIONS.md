@@ -69,17 +69,42 @@ execution paths for the same handlers.
 
 **Decision:** Port the *shape* of a `StackConfiguration` pattern (a
 `Record<AccountStage, {...}>` per-stage config object, validated where possible with
-Zod), scaled down to what this project actually needs (DynamoDB table name/endpoint,
-region, log level — not a full domain-specific config).
+Zod), scaled down to what this project actually needs.
 
-**`AccountStage`:** `Development | Staging | Production`. The source pattern this is
-based on relies on an `AccountStage` enum and stage-resolution helpers
+**`AccountStage`:** `Development | Staging | Production`, with 3-letter env-style
+string values (`dev`/`stg`/`prd`) rather than the full words. The source pattern this
+is based on relies on an `AccountStage` enum and stage-resolution helpers
 (e.g. `getLongRunningStage`, `isProductionLikeStage`) from a private shared library this
-repo has no access to — those are being rolled by hand, scoped to just the three stages
-above and only the resolution logic this project actually needs, rather than
-reimplementing the whole library.
+repo has no access to — those are being rolled by hand
+(`infra/stage.ts`, `resolveAccountStage`), scoped to just the three stages above and
+only the resolution logic this project actually needs, rather than reimplementing the
+whole library.
 
-**Env vars for Lambda handlers:** DynamoDB table name/endpoint/region will be set once
+**`infra/` directory:** `AccountStage`/`resolveAccountStage`/`StackConfiguration` live
+under a new top-level `infra/` directory, not `src/`, and are covered by
+`tsconfig.stacks.json` (`sst.config.ts` + IaC code — see "Repository layout"). They're
+IaC-time concerns: `sst.config.ts` (task 7) will read them to decide what to deploy and
+what env vars to hand Lambda functions, but the Lambda code itself never imports them —
+it just reads `process.env` (see `src/storage/dynamodb.ts`). Adding real files here
+also meant `tsconfig.stacks.json` was no longer an empty project (`include:
+["sst.config.ts", "infra/**/*.ts"]` now matches something even without `sst.config.ts`
+existing yet), so it got wired into the root `tsconfig.json`'s `references` ahead of
+schedule — `tsconfig.test.json`'s `include`/`references` were broadened to cover
+`infra/**/*.test.ts` too, alongside `src/**/*.test.ts`.
+
+**Resource identity is deliberately excluded from `StackConfiguration`:** the original
+plan (see "Environment / stage configuration" history) considered including a DynamoDB
+table name here, bucketed by `AccountStage` — that would be a real bug: `AccountStage`
+collapses many distinct raw SST stage strings (every developer's personal `sst dev`
+stage, every PR preview) into a single `Development` bucket, so two developers running
+`sst dev` at the same time would resolve to the *same* hardcoded table name and stomp on
+each other's data. `StackConfiguration` (`infra/stack-configuration.ts`) is scoped to
+genuinely stage-*behavioral* values only (currently `AWS_REGION`, `LOG_LEVEL`); anything
+needing per-stage uniqueness gets derived from the raw stage string directly wherever
+that resource is defined (task 7), never looked up through this config.
+
+**Env vars for Lambda handlers:** Whatever `StackConfiguration` ends up covering (plus
+resource identifiers derived separately, like the DynamoDB table name) will be set once
 in SST's function defaults (the v3 equivalent of a shared "default function
 props/environment" helper from prior SST v2 experience) so every handler picks them up
 without per-function wiring, matching the existing `USE_DYNAMODB` / `DYNAMODB_TABLE_NAME`

@@ -6,9 +6,10 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
 - [x] **1. tsconfig split**
   - [x] Replace `tsconfig.json` with a references-only file
   - [x] Add `tsconfig.lib.json` (Lambda source, excludes `*.test.ts`)
-  - [x] Add `tsconfig.stacks.json` (`sst.config.ts` + IaC code) — on disk, not yet
-        wired into root `references` (empty `include` fails `tsc --build`; wire in
-        during task 7 once `sst.config.ts` exists)
+  - [x] Add `tsconfig.stacks.json` (`sst.config.ts` + IaC code) — wired into root
+        `references` as of task 4/5, once `infra/*.ts` gave it real files to include
+        (an empty `include` fails `tsc --build`; `sst.config.ts` itself still doesn't
+        exist yet — added in task 7)
   - [x] Add `tsconfig.test.json` (co-located `*.test.ts` files)
   - [x] Move `src/__tests__/example.test.ts` next to `src/handlers/example.ts`
   - [x] Update `vitest.config.ts` include pattern if needed — not needed, default
@@ -37,13 +38,23 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [x] Updated `src/server.ts` and `src/handlers/example.test.ts` call sites for the
         new `(event, context)` signature (stub `{} as Context`)
 
-- [ ] **4. `AccountStage` + stage resolution**
-  - [ ] Local `AccountStage` enum: `Development | Staging | Production`
-  - [ ] Minimal stage-resolution helper(s) (only what this project needs)
+- [x] **4. `AccountStage` + stage resolution**
+  - [x] Local `AccountStage` enum: `Development | Staging | Production` — 3-letter
+        env-style values `dev`/`stg`/`prd`
+  - [x] Minimal stage-resolution helper (`resolveAccountStage`, `infra/stage.ts` +
+        `infra/stage.test.ts`) — named long-running stages map directly, everything
+        else (personal dev stages, PR previews) falls back to `Development`
 
-- [ ] **5. `StackConfiguration` per stage**
-  - [ ] Scaled-down per-stage config (DynamoDB table name, region, log level, etc.)
-  - [ ] Validate shape with Zod where useful
+- [x] **5. `StackConfiguration` per stage**
+  - [x] Scaled-down per-stage config: `AWS_REGION`, `LOG_LEVEL` only
+        (`infra/stack-configuration.ts` + test) — table name deliberately excluded,
+        see "Resource identity is deliberately excluded" in `DECISIONS.md`
+        (`AccountStage` buckets collapse distinct raw stages, so a table name looked
+        up by bucket would collide across concurrent personal dev stages)
+  - [x] Validated shape with Zod (`StackConfigurationSchema`)
+  - [x] Both live under a new top-level `infra/` directory (IaC-time code, not
+        bundled into Lambdas); `tsconfig.stacks.json` now has real files so it's
+        wired into the root `tsconfig.json` references ahead of schedule
 
 - [ ] **6. Single-table DynamoDB design**
   - [ ] Composite key: `PK = itemId`, `SK` prefixes (`latest`, `VERSION#000N`, `AUDIT#<ts>#000N`)
