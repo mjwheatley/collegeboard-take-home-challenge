@@ -10,7 +10,8 @@
  *   pnpm test:ui        - Run with interactive UI
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+
 import { createItemHandler, getItemHandler } from "./example.js";
 
 describe("Example Handlers", () => {
@@ -38,9 +39,11 @@ describe("Example Handlers", () => {
 
       expect(result.statusCode).toBe(201);
       expect(result.body).toHaveProperty("id");
+
       if ("subject" in result.body) {
         expect(result.body.subject).toBe("AP Biology");
       }
+
       if ("metadata" in result.body) {
         expect(result.body.metadata).toHaveProperty("author", "test-author");
       }
@@ -53,6 +56,7 @@ describe("Example Handlers", () => {
 
       expect(result.statusCode).toBe(404);
       expect(result.body).toHaveProperty("error");
+
       if ("error" in result.body) {
         expect(result.body.error).toBe("Item not found");
       }
@@ -78,10 +82,13 @@ describe("Example Handlers", () => {
       };
 
       const createResult = await createItemHandler(itemData);
+
       expect(createResult.body).toHaveProperty("id");
+
       if (!("id" in createResult.body)) {
         throw new Error("Item creation failed");
       }
+
       const itemId = createResult.body.id;
 
       // Then retrieve it
@@ -89,6 +96,7 @@ describe("Example Handlers", () => {
 
       expect(getResult.statusCode).toBe(200);
       expect(getResult.body).toHaveProperty("id", itemId);
+
       if ("subject" in getResult.body) {
         expect(getResult.body.subject).toBe("AP Calculus");
       }

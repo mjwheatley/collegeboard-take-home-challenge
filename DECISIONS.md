@@ -217,10 +217,60 @@ testing-library rules — none apply to this standalone Node/Lambda API project.
   `tsconfig.stacks.json`).
 - Running `eslint .` immediately surfaces real, pre-existing issues in
   `src/server.ts`, `src/storage/*.ts`, and `src/handlers/example.ts` (missing `await`,
-  `||` vs `??`, unused imports, etc.). Left alone deliberately — those files are
-  rewritten by tasks 2 (Zod types), 3 (validation middleware), 6 (single-table
-  DynamoDB), and 8 (removing `server.ts`), so reformatting them now would just be
-  thrown-away diff noise.
+  `||` vs `??`, unused imports, etc.) — see "Immediate lint cleanup" below for how
+  these were resolved rather than deferred.
+
+## Immediate lint cleanup
+
+**Decision:** Fixed every error `eslint .` surfaced across the starter code
+immediately, in the same pass as adding the config, rather than deferring to whichever
+later task naturally touches each file. `eslint .`, `pnpm typecheck`, and `pnpm test`
+all pass clean as of this point.
+
+**What changed, and why each was a real fix (not just satisfying a rule):**
+- `src/handlers/example.ts`: `createItemHandler(data: any)` → `data: CreateItemRequest`.
+  Runtime validation is still task 3's job (the `// TODO: Add validation using Zod`
+  comment stays), but the parameter no longer silently accepts anything.
+- `src/handlers/example.test.ts`: removed an unused `beforeEach` import.
+- `src/server.ts`: `JSON.parse(body)` now types as `unknown` instead of implicit `any`,
+  with an explicit `as CreateItemRequest` at the one call site that needs it (marked
+  with the same Zod-validation TODO as above — an explicit assertion documents "this is
+  unvalidated" more honestly than an implicit `any` did). `req.on('data', chunk => ...)`
+  now types `chunk: Buffer` explicitly instead of relying on the ambient `any`.
+  `url.split('/').pop()` (which can return `undefined`) is handled with a conditional
+  instead of a non-null assertion. `createServer(handleRequest)` — passing an `async`
+  function directly as a listener is a genuine bug shape (`no-misused-promises`): a
+  rejected promise inside `handleRequest` would become an unhandled rejection instead of
+  being caught by anything, since `http.Server`'s listener type doesn't await its
+  return; wrapped it in a listener that discards the promise explicitly (`void
+  handleRequest(req, res)`) — `handleRequest` already has its own try/catch, so this is
+  just making the "fire and forget" explicit rather than accidental.
+- `src/storage/dynamodb.ts`: removed unused `UpdateCommand`/`QueryCommand` imports
+  (leftover from before those operations were implemented — task 6 will reintroduce
+  transactional writes and queries for the single-table design, at which point these
+  come back). All `||` default-value patterns (`query.limit || 10`,
+  `result.Count || 0`, region/table-name env var fallbacks) switched to `??` — a real
+  correctness fix, since `||` incorrectly falls back to the default when the actual
+  value is a valid falsy one like `0`. `result.Item as ExamItem || null` → `(result.Item
+  as ExamItem | undefined) ?? null`, which keeps `undefined` in the type instead of
+  casting it away before the fallback ever runs. `createVersion`/`getAuditTrail` stubs:
+  dropped the pointless `async` keyword (they throw synchronously — `async` added
+  nothing) and prefixed the unused `id` param with `_` to mark it as intentionally
+  unused rather than suppressing the check project-wide.
+- `src/storage/memory.ts`: same `||` → `??` correctness fix throughout (notably
+  `query.offset || 0` / `query.limit || 0`, where a legitimate `offset: 0` was being
+  silently overridden). Added a scoped `@typescript-eslint/require-await: off` override
+  in `eslint.config.mjs` for this file specifically, rather than fixing each method —
+  this storage backend is deliberately synchronous (it's the in-memory/local-dev
+  implementation), and the interface's methods are typed `Promise<T>` so real backends
+  (DynamoDB) can actually be async; the `async` keyword is what makes a sync return
+  value satisfy `Promise<T>`, not a sign that an `await` was forgotten. This is the
+  documented use case for disabling this specific rule, not a workaround.
+- `eslint.config.mjs`: added `@typescript-eslint/restrict-template-expressions: off`
+  project-wide (matching the reference config's choice) — the rule's default (any
+  non-`string`/`number`-with-`allowNumber` type in a template literal is an error) was
+  flagging `${method} ${url}` (both possibly `undefined` on `IncomingMessage`) and
+  `${PORT}` (a `number`), neither of which is a real bug.
 
 ## Pre-commit hooks
 

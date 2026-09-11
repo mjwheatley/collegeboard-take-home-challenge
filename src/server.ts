@@ -6,19 +6,25 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+
 import { getItemHandler, createItemHandler } from './handlers/example.js';
 
-const PORT = process.env.PORT || 3000;
+import type { CreateItemRequest } from './types/item.js';
+
+const PORT = Number(process.env.PORT ?? 3000);
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const { method, url } = req;
 
   // Parse request body
   let body = '';
-  req.on('data', chunk => body += chunk);
-  await new Promise(resolve => req.on('end', resolve));
 
-  const parsedBody = body ? JSON.parse(body) : null;
+  req.on('data', (chunk: Buffer) => {
+    body += chunk.toString();
+  });
+  await new Promise((resolve) => req.on('end', resolve));
+
+  const parsedBody: unknown = body ? JSON.parse(body) : null;
 
   console.log(`${method} ${url}`);
 
@@ -30,6 +36,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   if (method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+
     return;
   }
 
@@ -40,10 +47,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === 'GET' && url === '/api/items/test') {
       result = await getItemHandler('test');
     } else if (method === 'POST' && url === '/api/items') {
-      result = await createItemHandler(parsedBody);
+      // TODO: Validate parsedBody with Zod instead of trusting the client (see task 3)
+      result = await createItemHandler(parsedBody as CreateItemRequest);
     } else if (method === 'GET' && url?.startsWith('/api/items/')) {
       const id = url.split('/').pop();
-      result = await getItemHandler(id!);
+
+      result = id ? await getItemHandler(id) : { statusCode: 400, body: { error: 'Missing item id' } };
     } else {
       result = {
         statusCode: 404,
@@ -60,7 +69,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-const server = createServer(handleRequest);
+const server = createServer((req, res) => {
+  void handleRequest(req, res);
+});
 
 server.listen(PORT, () => {
   console.log(`\n🚀 Server running at http://localhost:${PORT}`);

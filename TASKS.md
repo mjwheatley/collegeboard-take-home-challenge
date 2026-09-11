@@ -59,10 +59,11 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [x] General style rules (padding-line-between-statements, id-length)
   - [x] `husky` + `lint-staged`: pre-commit runs `eslint --fix` scoped to staged
         `*.ts` files, plus whole-project `pnpm typecheck` and `pnpm test`
-  - Note: running `eslint .` now surfaces real pre-existing issues in
-    `src/server.ts`, `src/storage/*`, `src/handlers/example.ts` — left as-is
-    intentionally since those files are rewritten by tasks 2, 3, 6, 8; not
-    worth reformatting code about to be replaced
+  - [x] Cleaned up all pre-existing lint errors surfaced across `src/server.ts`,
+        `src/storage/dynamodb.ts`, `src/storage/memory.ts`, `src/handlers/example.ts`
+        immediately (rather than deferring) — `eslint .`, `pnpm typecheck`, and
+        `pnpm test` all pass clean. See "Immediate lint cleanup" in `DECISIONS.md`
+        for what changed and why.
 
 - [ ] **10. Auth — Cognito (stretch, time-boxed; may remain deferred)**
   - [ ] Cognito User Pool in IaC

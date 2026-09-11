@@ -52,6 +52,7 @@ export default defineConfig(
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "as" }],
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-non-null-assertion": "warn",
+      "@typescript-eslint/restrict-template-expressions": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -108,6 +109,14 @@ export default defineConfig(
       "prefer-promise-reject-errors": "error",
       "no-throw-literal": "error",
       "no-template-curly-in-string": "error",
+    },
+  },
+  {
+    // Deliberately synchronous under an async ItemStorage interface (local dev only);
+    // the async keyword is what makes returns satisfy Promise<T>, not a real await.
+    files: ["src/storage/memory.ts"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
   {

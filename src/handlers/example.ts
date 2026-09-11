@@ -7,6 +7,8 @@
 
 import { createStorage } from '../storage/index.js';
 
+import type { CreateItemRequest } from '../types/item.js';
+
 const storage = createStorage();
 
 export async function getItemHandler(id: string) {
@@ -26,6 +28,7 @@ export async function getItemHandler(id: string) {
     };
   } catch (error) {
     console.error('Error getting item:', error);
+
     return {
       statusCode: 500,
       body: { error: 'Internal server error' },
@@ -33,7 +36,7 @@ export async function getItemHandler(id: string) {
   }
 }
 
-export async function createItemHandler(data: any) {
+export async function createItemHandler(data: CreateItemRequest) {
   try {
     // TODO: Add validation using Zod
     const item = await storage.createItem(data);
@@ -44,6 +47,7 @@ export async function createItemHandler(data: any) {
     };
   } catch (error) {
     console.error('Error creating item:', error);
+
     return {
       statusCode: 500,
       body: { error: 'Internal server error' },
