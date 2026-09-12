@@ -125,9 +125,13 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         something to work around here). See `DECISIONS.md` for why there's no fully
         offline Pulumi equivalent to `cdk synth`.
 
-- [ ] **8. Remove `src/server.ts`**
-  - [ ] Confirm `sst dev` covers the local dev loop
-  - [ ] Delete `src/server.ts` and any now-unused local-server scaffolding/scripts
+- [x] **8. Remove `src/server.ts`** (pulled forward during task 7's handler rework —
+      see `DECISIONS.md`)
+  - [x] Delete `src/server.ts` and any now-unused local-server scaffolding/scripts
+        (`start` script, `tsx` dependency)
+  - [ ] Confirm `sst dev` actually covers the local dev loop against a real deploy —
+        still pending an `AWS_PROFILE` with real deploy access (see pickup notes in
+        `TIME_LOG.md`); everything up to `sst diff`'s AWS auth step has been verified
 
 - [x] **9. ESLint config + pre-commit hook**
   - [x] Add `eslint.config.mjs`: `typescript-eslint` strict + stylistic type-checked base
@@ -143,14 +147,24 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         `pnpm test` all pass clean. See "Immediate lint cleanup" in `DECISIONS.md`
         for what changed and why.
 
-- [ ] **10. Auth — Cognito (stretch, time-boxed; may remain deferred)**
-  - [ ] Cognito User Pool in IaC
-  - [ ] Manually onboard test user(s) via AWS console
-  - [ ] Credential → token exchange (custom endpoint or hosted UI — TBD)
-  - [ ] Cognito authorizer guarding the API routes
-  - [ ] Wire real caller identity into `AuditEntry.changedBy`
+- [x] **10. Auth — Cognito — SKIPPED, deliberately, for time-box reasons**
+  - Session 1 landed at ~3h20m net (see `TIME_LOG.md`), already past the brief's
+    "1-3 hours" guidance before this task even started. Decided not to build it rather
+    than rush Cognito wiring (User Pool + authorizer + token exchange) in the time
+    remaining. `AuditEntry.changedBy` stays a self-reported, unauthenticated
+    placeholder — see "Authentication (skipped — time box)" in `DECISIONS.md`, which already
+    documents the intended shape if this gets picked up later.
+  - [ ] ~~Cognito User Pool in IaC~~
+  - [ ] ~~Manually onboard test user(s) via AWS console~~
+  - [ ] ~~Credential → token exchange (custom endpoint or hosted UI — TBD)~~
+  - [ ] ~~Cognito authorizer guarding the API routes~~
+  - [ ] ~~Wire real caller identity into `AuditEntry.changedBy`~~
 
-- [ ] **11. `ARCHITECTURE.md`**
-  - [ ] Write up from `DECISIONS.md` once the above settles: data model + DynamoDB
-        schema, infra choices/rationale, scalability, security approach, trade-offs
-        and future improvements
+- [ ] **11. `ARCHITECTURE.md`** (next up)
+  - [ ] Confirm `sst deploy`/`sst dev` actually works against a real AWS account
+        (task 8's last open item) once an `AWS_PROFILE` with real deploy access is
+        available, and that API Gateway routes actually hit the local/deployed code
+  - [ ] Write up from `DECISIONS.md`: data model + DynamoDB schema, infra
+        choices/rationale (including the SST v3 vs. CDK/Terraform deviation and the
+        auth-skip decision above), scalability, security approach, trade-offs and
+        future improvements
