@@ -102,7 +102,7 @@ SST's own recommended default for new APIs.
 
 **When v1 (REST API) would actually be needed instead:**
 - **API keys + usage plans** (per-client rate limiting) — this is a REST-API-only
-  feature. It's specifically the auth fallback noted in "Authentication (deferred)"
+  feature. It's specifically the auth fallback noted in "Authentication (skipped — time box)"
   above ("API keys... as a simpler fallback") — if that fallback is ever exercised
   instead of Cognito, it would require switching this to `ApiGatewayV1`.
 - **WAF** — REST APIs support WAF (classic and WAFv2) directly; HTTP API v2's WAF
@@ -486,26 +486,35 @@ diff?) — a real audit-log consumer needs to tell those apart.
   This is the first place AWS SDK call shapes are actually exercised, rather than just
   typechecked.
 
-## Authentication (deferred)
+## Authentication (skipped — time box)
 
-**Decision:** Defer implementing auth, but leaning toward Cognito, with manual user
-onboarding as the *provisioning* mechanism for it (not an alternative to it). Shape:
-provision a Cognito User Pool in IaC; onboard users manually via the AWS console (no
-self-service sign-up) rather than seeding a pool programmatically for this exercise;
-users authenticate with username/password to obtain an access token (either via a
-custom auth endpoint that does the exchange, or Cognito's hosted UI) and send that
-token in the API's `Authorization` header; endpoints are then guarded by a Cognito
-authorizer configured against that user pool. Not committing to build this yet — API
-keys remain a fallback if Cognito setup proves too much for the time box.
+**Decision (final for this submission):** Not implemented. Task 10 was explicitly
+skipped rather than rushed: session 1 landed at ~3h20m net actual work (see
+`TIME_LOG.md`), already past the brief's "1-3 hours" guidance before auth work would
+even have started. `AuditEntry.changedBy` remains a self-reported, unauthenticated
+placeholder (`metadata.author` from the request body) — a known, deliberate gap, not an
+oversight.
 
-**Why deferred:** Cognito gives real per-user identity for `AuditEntry.changedBy`, but
-manual console onboarding means there's no programmatic seeding step to build for this
-exercise — a meaningful reduction in scope over standing up a self-service sign-up flow
-or scripting user creation. The remaining open items are: whether to write a custom
-auth endpoint for the credential-to-token exchange or rely on the Cognito hosted UI, and
-whether the time box allows wiring the authorizer at all. API keys were also
-considered as a simpler fallback, but identify a *client*, not a *user* — insufficient
-for a per-user `changedBy` on audit entries.
+**The shape this would have taken, if time allowed:** Cognito, with manual user
+onboarding as the *provisioning* mechanism for it (not an alternative to it) — provision
+a Cognito User Pool in IaC; onboard users manually via the AWS console (no self-service
+sign-up, avoiding a programmatic seeding step); users authenticate with
+username/password to obtain an access token (either via a custom auth endpoint that
+does the exchange, or Cognito's hosted UI) and send that token in the API's
+`Authorization` header; endpoints guarded by a Cognito authorizer (HTTP API v2 supports
+this via a JWT authorizer directly — see "API Gateway version" above — no custom
+Lambda authorizer needed). API keys were considered as a simpler fallback, but identify
+a *client*, not a *user* — insufficient for a per-user `changedBy` on audit entries, so
+Cognito was always the intended real answer, not API keys.
+
+**Consequence for what's already built:** `actorLogMetadataMiddleware` (see "Task 7:
+full REST middleware stack") already contains the claims-extraction logic for exactly
+this Cognito JWT shape (`requestContext.authorizer.jwt.claims`) — it was built to be a
+safe no-op until an authorizer exists, specifically so this gap could be closed later
+without revisiting that middleware. Closing this gap means: add the Cognito resources to
+`infra/resources/` (a new `auth.ts`, following the same one-file-per-resource pattern as
+`database.ts`/`api-gateway.ts`), attach a JWT authorizer to the routes in
+`api-gateway.ts`, and the actor metadata starts flowing automatically.
 
 **Consequence:** Until an auth mechanism lands, `AuditEntry.changedBy` has no real
 identity source to draw from — `metadata.author` on the request body is a
@@ -634,4 +643,4 @@ per-file targeting.
 - Decide whether/how to build auth (Cognito User Pool + authorizer, manually onboarded
   users, custom token-exchange endpoint vs. hosted UI — vs. API keys as a fallback) —
   deferred, leaning Cognito. Blocks giving `AuditEntry.changedBy` a real identity
-  source (see "Authentication (deferred)" above).
+  source (see "Authentication (skipped — time box)" above).
