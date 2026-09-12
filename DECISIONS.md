@@ -26,7 +26,7 @@ the CDK-based SST v2 experience), so latest was used rather than pinning to `3.1
 has moved from `sst/sst` to `anomalyco/sst` — noted here only because it surprised the
 research process; it doesn't affect anything about this project's usage of the package.
 
-**Branching:** `mjwheatley/sst-v3` was branched from `mjwheatley/main` at the start of
+**Branching:** `mjwheatley/sst` was branched from `mjwheatley/main` at the start of
 task 7, specifically so a second branch (`mjwheatley/aws-cdk` or similar) can later
 implement the same infrastructure with AWS CDK for a side-by-side comparison, per the
 brief's original "CDK or Terraform" framing. In practice, task 7 turned out to have an
@@ -35,8 +35,8 @@ error formatting, logging, etc., none of which cares whether CDK, Terraform, or 
 provisions the underlying resources) and an IaC-specific part (`sst.config.ts` itself).
 The agnostic part was moved back to `mjwheatley/main` (so a future CDK/Terraform branch
 starts from the same handler code, rather than having to re-derive or cherry-pick it
-from `sst-v3`); `sst-v3` fast-forwards to include it and then continues with the
-SST-specific `sst.config.ts` work.
+from `mjwheatley/sst`); `mjwheatley/sst` fast-forwards to include it and then continues
+with the SST-specific `sst.config.ts` work.
 
 ## Repository layout
 

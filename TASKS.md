@@ -82,7 +82,7 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         AWS SDK call shapes (not just types) are exercised
 
 - [ ] **7. SST v3 setup** (IaC-specific part still pending; handler layer below is
-      IaC-agnostic and lives on `mjwheatley/main`, not the `mjwheatley/sst-v3` branch —
+      IaC-agnostic and lives on `mjwheatley/main`, not the `mjwheatley/sst` branch —
       see "Branching" in `DECISIONS.md`)
   - [x] **Handler layer (IaC-agnostic, done on `main`):** all 7 handlers rewritten
         around a full REST middleware stack (`createMiddyfiedRestHandler`, ported from
