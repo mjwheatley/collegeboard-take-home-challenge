@@ -38,7 +38,7 @@ export default defineConfig(
     settings: {
       "import-x/resolver-next": [
         createTypeScriptImportResolver({
-          project: ["tsconfig.lib.json", "tsconfig.test.json", "tsconfig.stacks.json"],
+          project: ["tsconfig.lib.json", "tsconfig.test.json", "tsconfig.stacks.json", "tsconfig.sst.json"],
           noWarnOnMultipleProjects: true,
         }),
         createNodeResolver({ extensions: [".js", ".ts", ".mjs", ".cjs"] }),
@@ -139,6 +139,14 @@ export default defineConfig(
     rules: {
       ...tseslintConfigs.disableTypeChecked.rules,
       "import-x/no-extraneous-dependencies": "off",
+    },
+  },
+  {
+    // SST's own generated boilerplate requires this exact triple-slash directive to
+    // pull in the Ion component types -- there's no `import` form for it.
+    files: ["sst.config.ts"],
+    rules: {
+      "@typescript-eslint/triple-slash-reference": "off",
     },
   },
 );

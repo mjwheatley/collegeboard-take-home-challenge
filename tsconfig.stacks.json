@@ -4,6 +4,6 @@
     "outDir": "./dist/stacks",
     "types": ["node"]
   },
-  "include": ["sst.config.ts", "infra/**/*.ts"],
-  "exclude": ["**/*.test.ts"]
+  "include": ["infra/**/*.ts"],
+  "exclude": ["**/*.test.ts", "infra/resources/**"]
 }

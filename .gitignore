@@ -12,6 +12,9 @@ dist/
 cdk.out/
 .cdk.staging/
 
+# SST
+.sst/
+
 # Environment
 .env
 .env.local

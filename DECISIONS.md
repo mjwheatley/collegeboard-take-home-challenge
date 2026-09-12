@@ -381,6 +381,94 @@ hand in `server.ts` for code about to be replaced by `sst dev` wasn't worth doin
 Deleted `src/server.ts`; `package.json`'s `dev` script is now `sst dev`, `start` was
 removed (no more `dist/server.js`), and the now-unused `tsx` dev dependency was removed.
 
+## `sst.config.ts`: the actual IaC
+
+**Decision:** `new sst.aws.Dynamo('ExamItemsTable', { fields: {PK:'string', SK:'string'},
+primaryIndex: {hashKey:'PK', rangeKey:'SK'} })` (matching the single-table design
+exactly) + `new sst.aws.ApiGatewayV2('Api')` with 7 routes, each pointing at the
+corresponding `src/handlers/items.ts` export.
+
+**Split into `infra/resources/database.ts` (`createExamItemsTable`) and
+`infra/resources/api-gateway.ts` (`createApi`), with `sst.config.ts` itself just
+orchestrating them** — one file per resource/concern, rather than one large `run()`
+body. These resource files use SST's Pulumi component APIs directly (`sst.aws.Dynamo`,
+`sst.aws.ApiGatewayV2`, the global `sst`/`aws` ambient namespace), the same as
+`sst.config.ts` itself — so they need the same ambient types available, and live in
+`tsconfig.sst.json`'s project alongside it (excluded from `tsconfig.stacks.json`, which
+covers the rest of `infra/**` — the plain-logic files with no SST-specific dependency).
+
+**Researched from the actual generated source, not docs summaries.** `sst.aws.*`
+component types aren't bundled in the `sst` npm package's `dist/` — they're generated
+on demand into `.sst/platform/` (real `.ts` source, not just `.d.ts`) by `sst install`,
+which needs no AWS credentials (just resolves/pins the Pulumi provider packages).
+Reading `.sst/platform/src/components/aws/{dynamo,function,apigatewayv2}.ts` directly
+gave authoritative answers to several things doc-site fetches were unreliable or
+incomplete on:
+- `ApiGatewayV2Args.link` applies to **all** routes automatically, but there's no
+  equivalent top-level `environment` — only `link`. Shared env vars (`DYNAMODB_TABLE_NAME`,
+  `AWS_REGION`, `LOG_LEVEL`, `ACCOUNT_STAGE`, `USE_DYNAMODB`) are set via one
+  `functionDefaults` object spread into every `.route()` call's handler `FunctionArgs`
+  instead — defined once, applied everywhere, even though SST itself doesn't have a
+  single "for every route" knob for anything beyond `link`.
+- Table physical naming (`naming.ts`'s `prefixName`) is `app-stage-name-<random>` by
+  **default**, already keyed off the raw `$app.stage` — confirming the task 5 design
+  (table identity must come from the raw stage, not the `AccountStage` bucket) is
+  exactly what SST already does for free; no extra naming code was needed.
+- `link:[table]` also grants the Lambda's IAM role DynamoDB access automatically
+  (`Dynamo implements Link.Linkable`) — kept alongside the explicit env vars rather
+  than switching application code to `Resource.ExamItemsTable.name`, since the storage
+  layer was deliberately built framework-agnostic (reads `process.env`, no `sst` import)
+  for testability — see "Repository layout"/"Environment / stage configuration".
+
+**`ACCOUNT_STAGE` env var now actually wired up** — `resolveAccountStage($app.stage)`,
+closing the loop DECISIONS.md flagged as pending when `jsonErrorMessageMiddleware`/
+`createMiddyfiedHandler` were built (they read `process.env.ACCOUNT_STAGE`, previously
+always unset).
+
+**TS composite-project boundary issue, and the actual fix.** `sst.config.ts`'s required
+`/// <reference path="./.sst/platform/config.d.ts" />` transitively imports SST's
+*entire* generated component library (every AWS/Cloudflare/Vercel component — hundreds
+of files), which a composite TS project (`tsconfig.base.json` sets `composite: true`)
+must have explicitly in its `include`, or `tsc --build` fails with `TS6307`. The fix is
+a dedicated `tsconfig.sst.json` covering `sst.config.ts` + `infra/resources/**/*.ts` +
+`.sst/platform/src/**/*.ts` explicitly (plus `infra/**/*.ts` again, redundantly with
+`tsconfig.stacks.json`, so the plain-logic files those resource files import — `stage.ts`,
+`stack-configuration.ts` — are part of the same program) — **not** the `composite: false`
+/ standalone-`tsc -p ... --noEmit` workaround this project went through first. That
+workaround avoided the `TS6307` error but broke IDE discoverability: editors find the
+"owning" project for a file by walking the *root* `tsconfig.json`'s `references` graph,
+and a non-composite, unreferenced project is invisible to that walk — the editor would
+fall back to an inferred/detached single-file mode with no `sst`/`$app` ambient globals,
+surfacing spurious "cannot find name" errors having nothing to do with the actual code.
+Testing revealed the fear behind the original workaround was unfounded: including all of
+`.sst/platform/src/**/*.ts` under our `tsconfig.base.json` settings (despite `.sst/platform`
+shipping its own, different tsconfig) compiles clean — SST's generated code just isn't
+written in a way that conflicts with `strict: true` etc. So `tsconfig.sst.json` is
+`composite: true` (inherited) and **is** in the root `tsconfig.json`'s `references`,
+exactly like every other sub-project; `package.json`'s `typecheck` is just `tsc --build`
+again, no second invocation. ESLint's `projectService` needed no `allowDefaultProject`
+workaround either, once the project was properly discoverable — and turning that off
+surfaced one real bug caught by real type-aware linting: `sst.config.ts`'s
+`app(input) { ... input?.stage ... }` used an unnecessary optional chain (`AppInput.stage`
+isn't actually optional per SST's real types) — fixed to `input.stage`.
+
+**SST requires imports inside `run()`, not top-level static imports** — discovered by
+actually running `sst diff`, which refused to start ("Your sst.config.ts has top level
+imports - this is not allowed") until `infra/stage.js`/`infra/stack-configuration.js`
+were changed to dynamic `await import(...)` calls inside `run()`. Not documented
+anywhere I found ahead of time; worth remembering for any future `sst.config.ts` work.
+
+**Validation performed:** `sst install` (generates `.sst/platform`, no AWS credentials
+needed) succeeded. `sst diff --stage dev` got as far as authenticating with AWS and
+attempting its bootstrap `ssm:GetParameter` check, failing only on
+`AccessDeniedException` — this environment's AWS credentials are scoped to Bedrock
+access, not general AWS resource management, and expanding that scope or attempting an
+actual deploy is out of bounds here. This is nonetheless meaningful validation beyond
+pure syntax checking: the config loads, resolves the `aws` provider, and begins
+processing — as far as "valid infrastructure code" can be confirmed without deploy
+access (see "Scope note": there's no CDK-`synth`-style fully-offline equivalent for
+Pulumi-based tools, which need credentials to compute even a preview/diff).
+
 ## Data model: single-table design for versions + audit trail
 
 **Endpoint naming discrepancy — resolved by adding `GET /api/items/:id/versions`:** The

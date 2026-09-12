@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist/sst-config",
+    "types": ["node"]
+  },
+  "include": [
+    "sst.config.ts",
+    "infra/**/*.ts",
+    ".sst/platform/config.d.ts",
+    ".sst/platform/src/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts"]
+}
