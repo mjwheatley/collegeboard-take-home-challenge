@@ -8,12 +8,11 @@
  * is defined, not looked up by `AccountStage`.
  */
 
-import { enum as zodEnum, object, string, type z } from 'zod';
+import { enum as zodEnum, object, type z } from 'zod';
 
 import { AccountStage, resolveAccountStage } from './stage.js';
 
 export const StackConfigurationSchema = object({
-  AWS_REGION: string(),
   LOG_LEVEL: zodEnum(['DEBUG', 'INFO', 'WARN', 'ERROR']),
 });
 
@@ -21,15 +20,12 @@ export type StackConfiguration = z.infer<typeof StackConfigurationSchema>;
 
 const configByAccountStage: Record<AccountStage, StackConfiguration> = {
   [AccountStage.Production]: {
-    AWS_REGION: 'us-east-1',
     LOG_LEVEL: 'INFO',
   },
   [AccountStage.Staging]: {
-    AWS_REGION: 'us-east-1',
     LOG_LEVEL: 'INFO',
   },
   [AccountStage.Development]: {
-    AWS_REGION: 'us-east-1',
     LOG_LEVEL: 'DEBUG',
   },
 };

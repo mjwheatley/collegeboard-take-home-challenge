@@ -13,7 +13,7 @@
 export default $config({
   app(input) {
     return {
-      name: 'item-challenge',
+      name: 'collegeboard-item-challenge',
       // AccountStage buckets the raw stage; production/staging get retain/protect,
       // everything else (personal dev stages, PR previews) is safe to tear down.
       removal: input.stage === 'production' ? 'retain' : 'remove',

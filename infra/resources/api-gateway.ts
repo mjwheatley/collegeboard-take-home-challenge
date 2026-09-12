@@ -10,7 +10,7 @@
 export interface CreateApiOptions {
   table: sst.aws.Dynamo;
   accountStage: string;
-  stackConfig: { AWS_REGION: string; LOG_LEVEL: string };
+  stackConfig: { LOG_LEVEL: string };
 }
 
 export function createApi({ table, accountStage, stackConfig }: CreateApiOptions) {
@@ -23,7 +23,6 @@ export function createApi({ table, accountStage, stackConfig }: CreateApiOptions
     environment: {
       USE_DYNAMODB: 'true',
       DYNAMODB_TABLE_NAME: table.name,
-      AWS_REGION: stackConfig.AWS_REGION,
       LOG_LEVEL: stackConfig.LOG_LEVEL,
       ACCOUNT_STAGE: accountStage,
     },
