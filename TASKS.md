@@ -81,13 +81,27 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
   - [x] `dynamodb.test.ts` added using `aws-sdk-client-mock` — first place the actual
         AWS SDK call shapes (not just types) are exercised
 
-- [ ] **7. SST v3 setup**
+- [ ] **7. SST v3 setup** (IaC-specific part still pending; handler layer below is
+      IaC-agnostic and lives on `mjwheatley/main`, not the `mjwheatley/sst-v3` branch —
+      see "Branching" in `DECISIONS.md`)
+  - [x] **Handler layer (IaC-agnostic, done on `main`):** all 7 handlers rewritten
+        around a full REST middleware stack (`createMiddyfiedRestHandler`, ported from
+        prior production work) — CORS, JSON body parsing, response serialization,
+        structured logging (Powertools), error-to-JSON-response mapping, actor/logger
+        metadata, Zod validation against the real structured `APIGatewayProxyEventV2`.
+        API Gateway version decided: `ApiGatewayV2` (HTTP API) — see "API Gateway
+        version" in `DECISIONS.md` for the v1 triggers (API keys, WAF) that would
+        change this. `src/server.ts` removed (task 8 pulled forward — see
+        `DECISIONS.md`). Full rationale/adaptations: "Task 7: full REST middleware
+        stack" in `DECISIONS.md`.
   - [ ] `sst.config.ts`
   - [ ] DynamoDB table component (single-table design) — composite key `{ PK, SK }`,
         not the original single `{ id }` key (see task 6 / `DECISIONS.md`)
-  - [ ] Lambda function(s) + API Gateway routes for the 7 endpoints (6 from the brief
-        + `GET /api/items/:id/versions`, added in task 6 — see `DECISIONS.md`)
-  - [ ] Function-defaults environment wiring (table name/endpoint/region) via SST, not per-function
+  - [ ] API Gateway routes for the 7 endpoints (6 from the brief +
+        `GET /api/items/:id/versions`, added in task 6 — see `DECISIONS.md`), pointing
+        at the handlers already built above
+  - [ ] Function-defaults environment wiring (table name/endpoint/region, `ACCOUNT_STAGE`
+        — see "Task 7: full REST middleware stack" in `DECISIONS.md`) via SST, not per-function
   - [ ] Per-stage config wired in via `StackConfiguration` (task 5)
 
 - [ ] **8. Remove `src/server.ts`**

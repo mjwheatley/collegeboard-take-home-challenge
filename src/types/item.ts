@@ -7,7 +7,7 @@
  * drift apart the way three separately maintained interfaces could.
  */
 
-import { enum as zodEnum, number, object, string, type z } from 'zod';
+import { coerce, enum as zodEnum, number, object, string, type z } from 'zod';
 
 const ExamItemContentSchema = object({
   question: string(),
@@ -69,9 +69,11 @@ export const UpdateItemRequestSchema = object({
 
 export type UpdateItemRequest = z.infer<typeof UpdateItemRequestSchema>;
 
+// Coerced (not plain number()) because these also validate raw HTTP query string
+// parameters, which always arrive as strings (e.g. "?limit=5" -> { limit: "5" }).
 export const PaginationQuerySchema = object({
-  limit: number().int().positive().optional(),
-  offset: number().int().min(0).optional(),
+  limit: coerce.number().int().positive().optional(),
+  offset: coerce.number().int().min(0).optional(),
 });
 
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;

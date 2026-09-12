@@ -14,6 +14,30 @@ mistaken for a misunderstanding of the requirements. `cdk synth` / `terraform pl
 apply; `sst diff` / `sst deploy --stage <stage>` (or dry-run equivalent) is the validation
 path instead.
 
+**Package version:** `sst@4.17.1` (latest) is installed, not a `3.x` release. Per SST's
+own migrate-from-v3 guide, this doesn't change the comparison being made here — v4's
+component API (`sst.aws.*`, `$config`, `.link()`) is the same "Ion" architecture as v3;
+the major bump is about upgrading the underlying Pulumi AWS provider (v6 → v7), plus a
+few internal renames (dropping an S3 resource's `V2` suffix, `tags` → `tagsAll`). None
+of that affects what's being evaluated here (this Pulumi/component-based approach vs.
+the CDK-based SST v2 experience), so latest was used rather than pinning to `3.19.3`.
+
+**Note on the upstream repo:** as of this install, the GitHub org for the `sst` project
+has moved from `sst/sst` to `anomalyco/sst` — noted here only because it surprised the
+research process; it doesn't affect anything about this project's usage of the package.
+
+**Branching:** `mjwheatley/sst-v3` was branched from `mjwheatley/main` at the start of
+task 7, specifically so a second branch (`mjwheatley/aws-cdk` or similar) can later
+implement the same infrastructure with AWS CDK for a side-by-side comparison, per the
+brief's original "CDK or Terraform" framing. In practice, task 7 turned out to have an
+IaC-agnostic part (the handler/middleware layer — real API Gateway event handling,
+error formatting, logging, etc., none of which cares whether CDK, Terraform, or SST
+provisions the underlying resources) and an IaC-specific part (`sst.config.ts` itself).
+The agnostic part was moved back to `mjwheatley/main` (so a future CDK/Terraform branch
+starts from the same handler code, rather than having to re-derive or cherry-pick it
+from `sst-v3`); `sst-v3` fast-forwards to include it and then continues with the
+SST-specific `sst.config.ts` work.
+
 ## Repository layout
 
 **Decision:** Keep the flat `src/` layout the starter provided (no `apps/` split — this
@@ -64,6 +88,30 @@ v3's component API rather than copied.
 dropped in favor of `sst dev`, which runs the actual Lambda handlers locally against
 live/linked infrastructure. Keeping both would mean maintaining two separate local
 execution paths for the same handlers.
+
+**API Gateway version: `sst.aws.ApiGatewayV2` (HTTP API), not `ApiGatewayV1` (REST API).**
+
+**Decision:** Use HTTP API (`ApiGatewayV2`).
+
+**Rationale:** ~70% cheaper per request and lower latency than REST API; native JWT
+authorizer support fits the Cognito auth plan directly (a Cognito User Pool's OIDC
+issuer works as a JWT authorizer without a custom Lambda); request/response validation
+is already handled by `zodValidatorMiddleware` (task 3), so REST API's built-in
+JSON-Schema request-validation models would be redundant here anyway. This is also
+SST's own recommended default for new APIs.
+
+**When v1 (REST API) would actually be needed instead:**
+- **API keys + usage plans** (per-client rate limiting) — this is a REST-API-only
+  feature. It's specifically the auth fallback noted in "Authentication (deferred)"
+  above ("API keys... as a simpler fallback") — if that fallback is ever exercised
+  instead of Cognito, it would require switching this to `ApiGatewayV1`.
+- **WAF** — REST APIs support WAF (classic and WAFv2) directly; HTTP API v2's WAF
+  support is comparatively newer/more limited depending on the AWS region and setup.
+  If a WAF requirement comes up later, that's the other trigger to reconsider v1.
+
+Neither applies today (auth plan is Cognito-first, no WAF requirement), so `ApiGatewayV2`
+is the right call for now — but both are documented here as the specific, concrete
+reasons to revisit this choice, not a vague "maybe v1 someday."
 
 ## Environment / stage configuration
 
@@ -211,6 +259,127 @@ generics don't get inferred from a bare arrow function due to its multi-overload
 signature (`LambdaHandler | MiddlewareHandler | PluginObject`), so the inner handler
 function's parameter needed an explicit type annotation in a few spots (`TS7006`
 otherwise) even though the outer `middy<...>()` call already states the same type.
+
+## Task 7: full REST middleware stack (supersedes the task-3 event-shape design)
+
+**Decision:** Adopted the `createMiddyfiedRestHandler`/`createMiddyfiedHandler` pattern
+from prior production work (a payment-processing API), porting every middleware in
+that composition **except `featureFlagMiddleware`** (this project has no feature-flag
+service) — CORS, actor/logger metadata, response headers, header normalization, JSON
+body parsing, error-to-JSON-response mapping, content negotiation, response
+serialization, structured request/response/error logging, and Zod validation.
+
+**This supersedes, rather than extends, the task-3 "normalized domain payload" event
+design.** Task 3 deliberately avoided guessing at API Gateway's real event shape by
+inventing a flat, already-normalized event object (`{ id: string }`,
+`CreateItemRequest` directly) and a hand-rolled `http-adapter.ts`
+(`adaptApiGatewayEvent`/`formatApiGatewayResponse`/`toWebHandler`) to bridge a real
+event to that shape. Adopting this reference pattern made that bridge **redundant**:
+`@middy/http-json-body-parser` + `@middy/http-response-serializer` already do exactly
+that job, tested in production. `http-adapter.ts` and its test were deleted; handlers
+now take the real (structured) event directly.
+
+**New dependencies added:** `@aws-lambda-powertools/logger` (structured logging —
+`resetLoggerKeysMiddleware`/`actorLogMetadataMiddleware` need a real Powertools
+`Logger` instance, not a duck-typed stand-in, since they call
+`injectLambdaContext`/`.appendKeys()`/`.resetKeys()`), `@middy/http-cors`,
+`@middy/http-header-normalizer`, `@middy/http-json-body-parser`,
+`@middy/http-content-negotiation`, `@middy/http-response-serializer`, `@middy/util`.
+
+**What had to be adapted, not copied — the source pattern leans on private packages
+this repo has no access to** (`@team-and-tech/aws-config-utils`,
+`@trajector/common-types`, `@webdeveric/utils`, `@trajector/node-lambda-logger`):
+- `StatusCode` enum, `HttpError`/`NotFoundError`/`RequestTimeoutError` classes, and
+  `getErrorDetails`/`removeStackProperty` (recursively extracting an Error's own
+  properties, since `JSON.stringify(error)` omits them by default) were all
+  reimplemented locally and simplified (no deep `AggregateError`/multi-error-array
+  handling — this project's error model doesn't need it).
+- `AccountStage` comparisons (`process.env['SST_STAGE'] === AccountStage.Production`)
+  became `process.env.ACCOUNT_STAGE === 'prd'` — a plain string compare against our own
+  3-letter stage codes (`infra/stage.ts`), not an import of the `infra/` module into
+  runtime code (which would violate the `src`/`infra` boundary from "Repository
+  layout" — `infra/` isn't part of `tsconfig.lib.json`'s project). `ACCOUNT_STAGE` is a
+  **new env var task 7's remaining `sst.config.ts` work needs to set** via SST's
+  function defaults (derived from `resolveAccountStage($app.stage)`) — absent today, so
+  every default resolves as if not-production (the right default for local dev/tests).
+- **API Gateway version**: the source pattern's types (`APIGatewayProxyEvent`,
+  `APIGatewayProxyResult`, `WithPathParameters<... extends APIGatewayProxyEvent ...>`)
+  are all v1 (REST API); this project uses v2 (HTTP API — see the "API Gateway version"
+  decision above), so every type was ported as the v2 equivalent
+  (`APIGatewayProxyEventV2`, `APIGatewayProxyStructuredResultV2`,
+  `APIGatewayEventRequestContextJWTAuthorizer`'s `jwt.claims` shape for
+  `actorLogMetadataMiddleware`'s actor extraction instead of v1's `requestContext.authorizer`).
+- `corsMiddleware` reads an env var for the allowed-origins allowlist; there's no known
+  SPA/frontend origin for this project yet, so it defaults to `["*"]` rather than the
+  source's fail-closed empty array (no cookies are ever used per the deferred auth
+  plan, so a permissive CORS default carries no credential-leak risk).
+- `responseHeadersMiddleware` was ported as the generic, reusable middleware; its
+  specific header values in the source (`Server`, `Build-Data` — built from
+  `GITHUB_SHA`/`GITHUB_REF`/a CI build timestamp) were dropped since this project has
+  no CI pipeline producing that metadata. Only `Stage` (from `ACCOUNT_STAGE`) is set.
+- **`awsLambdaInvokeStore` and `okResult` were deliberately not ported** — the former
+  has zero consumers anywhere in this codebase (it exists in the source to support
+  other cross-cutting code that reads from its `AsyncLocalStorage`-backed store, which
+  this project doesn't have); the latter is a `{statusCode: 200, ...}` convenience
+  wrapper this project's explicit-envelope handler style doesn't need.
+- `requestResponseLogger` *was* ported as-is (no private-package dependency beyond the
+  logger itself).
+
+**Response schema design changed along with the event shape.** Task 3's response
+schemas were status-code-tagged unions (`literal(200)|literal(404)|literal(500)`)
+because errors were *returned*, not thrown. Now that expected failures throw
+`NotFoundError` (caught by `jsonErrorMessageMiddleware`, which formats the JSON error
+response and bypasses `responseSchema` entirely — Middy routes a thrown error straight
+to `onError`, skipping the remaining `after` hooks including `zodValidatorMiddleware`'s),
+each handler's `responseSchema` only needs to validate its **single success shape**
+(e.g. `object({statusCode: literal(200), body: ExamItemSchema})`) — no union needed.
+Handlers needing a non-`200` success status (`createItem`, `createVersion`: `201`) still
+return an explicit `{statusCode, body}` envelope rather than a bare value, since Middy's
+`normalizeHttpResponse` only defaults to `200` for a bare value — there's no way to
+express "succeeded with 201" other than the explicit envelope. This mirrors a mix of two
+styles actually present in the reference codebase (bare-value-success-plus-throw for
+always-200 handlers; explicit-envelope-for-every-branch for handlers needing other
+success codes) — this project uses the explicit envelope uniformly across all 7 handlers
+for consistency, combined with throwing `NotFoundError` for the not-found case (the
+source's plain-envelope-only handlers skip `responseSchema` validation entirely on
+their error branches; ours doesn't need to, since errors never reach it).
+
+**No catch-all try/catch in handler bodies anymore.** Task 3/6's handler functions each
+wrapped their body in `try { ... } catch { return {statusCode:500, ...} }`. That's
+removed: catching-and-returning-a-plain-object instead of rethrowing meant
+`request.error` was never set, so `requestResponseLogger`'s `onError` hook (and thus
+Powertools' structured error logging) never actually fired for unexpected failures —
+a real regression once this logging infrastructure existed to catch them. Unexpected
+errors now propagate naturally; `jsonErrorMessageMiddleware` formats them into a 500
+JSON response exactly like it does for `NotFoundError`, just with `expose` defaulting
+to hiding the message once deployed to `prd`.
+
+**`createMiddyfiedRestHandler` is deliberately non-generic / loosely typed**
+(`requestSchema?: ZodType<unknown>`, not `ZodType<TEvent>` parameterized to match a
+specific handler's hand-written event type) — matching the source pattern exactly.
+Trying to make Zod's inferred schema-output type line up exactly with a hand-written
+`WithPathParameters<...>`-style type turned out to be more type-system fighting than
+it's worth (see the many now-reverted attempts at parameterizing this generically);
+runtime validation is what actually enforces correctness, and the hand-written type is
+documentation for the handler body, not something TS cross-checks against the schema.
+
+**Test-fixture gotcha worth remembering:** `@middy/http-json-body-parser` throws a 422
+if `body` is `undefined` **whenever its content-type check passes** — but
+`disableContentTypeError: true` (set in `createMiddyfiedRestHandler`) only suppresses
+the error on a content-type *mismatch*, not on a genuinely missing body. A GET request
+fixture that (incorrectly) sets `content-type: application/json` with no body will
+422; a real GET request wouldn't send that header at all (no body to describe), which
+is what makes the content-type check fail and `disableContentTypeError` skip parsing
+entirely. `items.test.ts`'s `fakeEvent` helper only sets that header when a body is
+actually provided, to match.
+
+**`server.ts` removal (task 8) pulled forward.** The starter's local dev server
+constructed plain Node `http` requests and called handlers with the task-3 normalized
+shape directly. Handlers now require a real, fully-structured `APIGatewayProxyEventV2`
+(`pathParameters`, `requestContext`, `headers`, etc.) — reasonably faking that shape by
+hand in `server.ts` for code about to be replaced by `sst dev` wasn't worth doing.
+Deleted `src/server.ts`; `package.json`'s `dev` script is now `sst dev`, `start` was
+removed (no more `dist/server.js`), and the now-unused `tsx` dev dependency was removed.
 
 ## Data model: single-table design for versions + audit trail
 
