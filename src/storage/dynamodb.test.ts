@@ -113,7 +113,7 @@ describe('DynamoDBStorage.updateItem', () => {
 });
 
 describe('DynamoDBStorage.listItems', () => {
-  it('filters out non-latest records and paginates client-side', async () => {
+  it('falls back to a bounded Scan when no filters are given, and paginates client-side', async () => {
     const items: ExamItem[] = Array.from({ length: 3 }, (_, index) => ({
       ...createRequest,
       id: `item-${index}`,
@@ -129,6 +129,63 @@ describe('DynamoDBStorage.listItems', () => {
 
     expect(result.total).toBe(3);
     expect(result.items).toHaveLength(2);
+  });
+
+  it('queries GSI1 by subject when only subject is given', async () => {
+    const item: ExamItem = {
+      ...createRequest,
+      id: 'item-1',
+      metadata: { ...createRequest.metadata, created: 1, lastModified: 1, version: 1 },
+    };
+
+    ddbMock.on(QueryCommand).resolves({ Items: [toStoredItem(item, 'latest')] });
+
+    const storage = new DynamoDBStorage();
+    const result = await storage.listItems({ subject: 'AP Biology' });
+
+    expect(result.total).toBe(1);
+
+    const call = ddbMock.commandCalls(QueryCommand)[0]?.args[0].input;
+
+    expect(call.IndexName).toBe('GSI1');
+    expect(call.KeyConditionExpression).toBe('GSI1PK = :subject');
+    expect(call.ExpressionAttributeValues?.[':subject']).toBe('AP Biology');
+  });
+
+  it('queries GSI2 by status when only status is given', async () => {
+    const item: ExamItem = {
+      ...createRequest,
+      id: 'item-1',
+      metadata: { ...createRequest.metadata, created: 1, lastModified: 1, version: 1 },
+    };
+
+    ddbMock.on(QueryCommand).resolves({ Items: [toStoredItem(item, 'latest')] });
+
+    const storage = new DynamoDBStorage();
+    const result = await storage.listItems({ status: 'draft' });
+
+    expect(result.total).toBe(1);
+
+    const call = ddbMock.commandCalls(QueryCommand)[0]?.args[0].input;
+
+    expect(call.IndexName).toBe('GSI2');
+    expect(call.KeyConditionExpression).toBe('GSI2PK = :status');
+    expect(call.ExpressionAttributeValues?.[':status']).toBe('draft');
+  });
+
+  it('queries GSI1 with a status prefix when both subject and status are given', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const storage = new DynamoDBStorage();
+
+    await storage.listItems({ subject: 'AP Biology', status: 'draft' });
+
+    const call = ddbMock.commandCalls(QueryCommand)[0]?.args[0].input;
+
+    expect(call.IndexName).toBe('GSI1');
+    expect(call.KeyConditionExpression).toBe('GSI1PK = :subject AND begins_with(GSI1SK, :statusPrefix)');
+    expect(call.ExpressionAttributeValues?.[':subject']).toBe('AP Biology');
+    expect(call.ExpressionAttributeValues?.[':statusPrefix']).toBe('STATUS#draft#');
   });
 });
 

@@ -31,9 +31,12 @@ import { ItemStorage } from './interface.js';
 import {
   AUDIT_SK_PREFIX,
   LATEST_SK,
+  STATUS_INDEX_NAME,
+  SUBJECT_INDEX_NAME,
   VERSION_SK_PREFIX,
   buildAuditKey,
   buildLatestKey,
+  buildListIndexAttributes,
   buildVersionKey,
   stripKeys,
 } from './single-table-keys.js';
@@ -87,7 +90,12 @@ export class DynamoDBStorage implements ItemStorage {
     await this.client.send(
       new TransactWriteCommand({
         TransactItems: [
-          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(item.id), ...item } } },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildLatestKey(item.id), ...buildListIndexAttributes(item), ...item },
+            },
+          },
           { Put: { TableName: this.tableName, Item: { ...buildVersionKey(item.id, 1), ...item } } },
           { Put: { TableName: this.tableName, Item: { ...buildAuditKey(item.id, now, 1), ...auditEntry } } },
         ],
@@ -139,7 +147,12 @@ export class DynamoDBStorage implements ItemStorage {
     await this.client.send(
       new TransactWriteCommand({
         TransactItems: [
-          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(id), ...updated } } },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildLatestKey(id), ...buildListIndexAttributes(updated), ...updated },
+            },
+          },
           {
             Put: {
               TableName: this.tableName,
@@ -159,31 +172,40 @@ export class DynamoDBStorage implements ItemStorage {
     return updated;
   }
 
+  private async queryIndex(
+    indexName: string,
+    keyConditionExpression: string,
+    expressionAttributeValues: Record<string, unknown>,
+  ): Promise<ExamItem[]> {
+    const matched: ExamItem[] = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+
+    do {
+      const result = await this.client.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          IndexName: indexName,
+          KeyConditionExpression: keyConditionExpression,
+          ExpressionAttributeValues: expressionAttributeValues,
+          ExclusiveStartKey: exclusiveStartKey,
+        }),
+      );
+
+      matched.push(...(result.Items ?? []).map((item) => stripKeys<ExamItem>(item)));
+      exclusiveStartKey = result.LastEvaluatedKey;
+    } while (exclusiveStartKey);
+
+    return matched;
+  }
+
   /**
-   * Basic Scan-based implementation. Every item now has 3 physical rows sharing a
-   * partition (latest/version/audit), so Limit can't be passed straight through --
-   * it would count the wrong rows and could return zero matches on a page full of
-   * VERSION#/AUDIT# records even when matching items exist elsewhere in the table.
-   * Pages through Scan (bounded by MAX_LIST_SCAN_PAGES) collecting only `latest`
-   * records that pass the filters, then paginates client-side. For a real production
-   * table, this should be a Query against a GSI keyed by subject/status instead.
+   * Every item has 3 physical rows sharing a partition (latest/version/audit), so
+   * Limit can't be passed straight through to Scan -- it would count the wrong rows
+   * and could return zero matches on a page full of VERSION#/AUDIT# records even when
+   * matching items exist elsewhere in the table. Pages through Scan (bounded by
+   * MAX_LIST_SCAN_PAGES) collecting only `latest` records, then paginates client-side.
    */
-  async listItems(query: ListItemsQuery): Promise<{ items: ExamItem[]; total: number }> {
-    const filterParts = ['SK = :sk'];
-    const expressionAttributeValues: Record<string, unknown> = { ':sk': LATEST_SK };
-    const expressionAttributeNames: Record<string, string> = {};
-
-    if (query.subject) {
-      filterParts.push('subject = :subject');
-      expressionAttributeValues[':subject'] = query.subject;
-    }
-
-    if (query.status) {
-      filterParts.push('metadata.#status = :status');
-      expressionAttributeNames['#status'] = 'status';
-      expressionAttributeValues[':status'] = query.status;
-    }
-
+  private async scanAllLatestItems(): Promise<ExamItem[]> {
     const matched: ExamItem[] = [];
     let exclusiveStartKey: Record<string, unknown> | undefined;
     let scanPages = 0;
@@ -192,11 +214,8 @@ export class DynamoDBStorage implements ItemStorage {
       const result = await this.client.send(
         new ScanCommand({
           TableName: this.tableName,
-          FilterExpression: filterParts.join(' AND '),
-          ExpressionAttributeValues: expressionAttributeValues,
-          ExpressionAttributeNames: Object.keys(expressionAttributeNames).length
-            ? expressionAttributeNames
-            : undefined,
+          FilterExpression: 'SK = :sk',
+          ExpressionAttributeValues: { ':sk': LATEST_SK },
           ExclusiveStartKey: exclusiveStartKey,
         }),
       );
@@ -206,6 +225,45 @@ export class DynamoDBStorage implements ItemStorage {
       scanPages += 1;
     } while (exclusiveStartKey && scanPages < MAX_LIST_SCAN_PAGES);
 
+    return matched;
+  }
+
+  private async findMatchingLatestItems(query: ListItemsQuery): Promise<ExamItem[]> {
+    if (query.subject && query.status) {
+      return this.queryIndex(SUBJECT_INDEX_NAME, 'GSI1PK = :subject AND begins_with(GSI1SK, :statusPrefix)', {
+        ':subject': query.subject,
+        ':statusPrefix': `STATUS#${query.status}#`,
+      });
+    }
+
+    if (query.subject) {
+      return this.queryIndex(SUBJECT_INDEX_NAME, 'GSI1PK = :subject', { ':subject': query.subject });
+    }
+
+    if (query.status) {
+      return this.queryIndex(STATUS_INDEX_NAME, 'GSI2PK = :status', { ':status': query.status });
+    }
+
+    return this.scanAllLatestItems();
+  }
+
+  /**
+   * When a `subject` and/or `status` filter is given, this Queries the sparse
+   * GSI1/GSI2 indexes (see `single-table-keys.ts`) instead of Scanning the table --
+   * those indexes only ever contain `latest` records, so every page returned is
+   * already a match with no client-side filtering needed. `subject` alone or
+   * `subject` + `status` both use GSI1 (status narrows via `begins_with` on GSI1SK);
+   * `status` alone uses GSI2.
+   *
+   * With no filters there's no selective key to Query on, so this falls back to the
+   * bounded Scan (see `scanAllLatestItems`) -- listing literally everything has no
+   * way around a full-table read in this design.
+   *
+   * Note: GSI1/GSI2 aren't provisioned in IaC yet (tracked on a separate branch);
+   * this Query will fail against a table that doesn't have them.
+   */
+  async listItems(query: ListItemsQuery): Promise<{ items: ExamItem[]; total: number }> {
+    const matched = await this.findMatchingLatestItems(query);
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 10;
 
@@ -239,7 +297,12 @@ export class DynamoDBStorage implements ItemStorage {
     await this.client.send(
       new TransactWriteCommand({
         TransactItems: [
-          { Put: { TableName: this.tableName, Item: { ...buildLatestKey(id), ...newVersion } } },
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: { ...buildLatestKey(id), ...buildListIndexAttributes(newVersion), ...newVersion },
+            },
+          },
           {
             Put: {
               TableName: this.tableName,
