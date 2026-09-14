@@ -574,6 +574,47 @@ diff?) — a real audit-log consumer needs to tell those apart.
   same `GSI1PK`/`GSI1SK`/`GSI2PK`/`GSI2SK` attribute names the app writes — this
   landed on `mjwheatley/sst` once that branch actually defined the table's IaC (`main`
   still has none).
+- **`listItems` pagination is still "fetch everything, then slice" — a known
+  follow-up, not the idiomatic DynamoDB pattern.** Even after the `GSI1`/`GSI2` change
+  above, `queryIndex`/`scanAllLatestItems` each loop internally on `ExclusiveStartKey`
+  until they've drained every matching page, and `listItems` only applies the caller's
+  `offset`/`limit` afterward, in memory, over that fully-collected array (`total` is
+  just `matched.length`). This works and is correct (modulo the `MAX_LIST_SCAN_PAGES`
+  cap on the no-filter path), but it re-reads the *entire* matching result set on every
+  call rather than fetching one bounded page.
+  - **The idiomatic DynamoDB shape** would drop `offset`/`total` entirely in favor of a
+    forward-only opaque cursor: request `{ limit?, cursor? }`, pass `limit` straight
+    through as `Limit` on the `QueryCommand`/`ScanCommand`, pass the decoded `cursor` as
+    `ExclusiveStartKey`, and return `{ items, nextCursor? }` where `nextCursor` is the
+    page's `LastEvaluatedKey` (encoded), present only if more results exist. No
+    `Limit`-sized DynamoDB call ever reads more than one page.
+  - **Why this is a real, not cosmetic, redesign:** DynamoDB has no `skip`/`offset`
+    operation — `ExclusiveStartKey` only supports "continue from exactly here," so an
+    offset-based API is fundamentally incompatible with efficient native pagination;
+    reaching "page 47" cold still costs 46 sequential reads no matter what, offset or
+    cursor. Likewise, an exact `total` requires reading every matching item — identical
+    cost to `Select: 'COUNT'` — so it's dropped in favor of `nextCursor`'s presence
+    signaling "more may exist" (`hasMore`).
+  - **Comparison point — this is a real MongoDB-vs-DynamoDB tradeoff, not just a
+    missing feature.** MongoDB's `collection.find(query).sort(...).skip(...).limit(...)`
+    plus a separate `countDocuments(query)` gives real random-access paging (jump to any
+    page) and an exact count, for *any* query shape, because Mongo can index fields
+    after the fact and its cursor model supports `skip`. DynamoDB requires the access
+    pattern (which fields you filter/sort by) to be baked into a `Query`-able key
+    (`GSI1`/`GSI2` here) ahead of time, has no `skip`, and has no cheap count. Mongo
+    trades that flexibility for less predictable performance at scale (a `skip` deep
+    into a large result set, or an unindexed `sort`, degrades quietly); DynamoDB trades
+    away the flexibility for consistent, predictable latency, but only for the access
+    patterns you explicitly designed indexes for. For an admin-style search/reporting
+    UI where filters, sort fields, and exact counts are all expected to be arbitrary,
+    Mongo's model is a legitimately better fit than forcing that shape onto DynamoDB.
+  - **Scope note:** not implemented — `listVersions` shares the same `PaginationQuery`
+    type and has the identical "drain then slice" shape in `dynamodb.ts`, and
+    `MemoryStorage` would need an equivalent (but different — no native
+    `LastEvaluatedKey` equivalent over a `Map`) cursor design to keep both
+    `ItemStorage` implementations consistent. Left as a follow-up given the scope of an
+    API-contract change (drops `offset`/`total` from `ListItemsQuerySchema` and the
+    `listItemsHandler`/`listVersionsHandler` response schemas in `src/handlers/items.ts`).
 - **`MemoryStorage` asymmetry with `DynamoDBStorage`:** `MemoryStorage` keeps a
   `versions: Map<string, ExamItem[]>` (full snapshots, mirroring `VERSION#` records)
   now that `listVersions` actually reads one — this was previously simplified away
