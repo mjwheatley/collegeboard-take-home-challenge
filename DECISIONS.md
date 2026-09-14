@@ -471,9 +471,20 @@ diff?) — a real audit-log consumer needs to tell those apart.
   scan mostly `VERSION#`/`AUDIT#` rows. Fixed by paging through `Scan` (bounded by
   `MAX_LIST_SCAN_PAGES`, since this is a full scan, not a `Query`) collecting all
   filter-matching `latest` records first, then paginating client-side — correct
-  `total`, at the cost of scanning more than strictly necessary. The code's own
-  comment (carried over from the original) still says what the real fix is: a `Query`
-  against a GSI keyed by `subject`/`status`, out of scope here.
+  `total`, at the cost of scanning more than strictly necessary.
+- **`listItems` now Queries instead of Scans when a filter is given:** `latest`
+  records (only) also carry `GSI1PK`/`GSI1SK` (`subject` / `STATUS#<status>#<id>`)
+  and `GSI2PK`/`GSI2SK` (`status` / `SUBJECT#<subject>#<id>`) — see
+  `single-table-keys.ts`. Since `VERSION#`/`AUDIT#` rows never get these attributes,
+  both indexes are sparse and contain exactly the `latest` rows, so a `Query` against
+  either needs no further filtering. `subject` (optionally + `status` via
+  `begins_with` on `GSI1SK`) queries `GSI1`; `status` alone queries `GSI2`. With
+  *no* filter there's no selective key to query, so `listItems` falls back to the
+  bounded `Scan` described above — full-table listing has no way around a full-table
+  read in this design. These GSIs aren't provisioned in IaC yet — this repo's `main`
+  doesn't define the table's IaC at all yet (tracked on a separate branch) — so this
+  is app-side key design only; the `Query` calls will fail against a table lacking
+  `GSI1`/`GSI2` until that IaC lands.
 - **`MemoryStorage` asymmetry with `DynamoDBStorage`:** `MemoryStorage` keeps a
   `versions: Map<string, ExamItem[]>` (full snapshots, mirroring `VERSION#` records)
   now that `listVersions` actually reads one — this was previously simplified away
