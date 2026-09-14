@@ -18,8 +18,8 @@
  *     — supports "by subject" and "by subject + status" lookups.
  *   - GSI2 (`status`):  GSI2PK = status,  GSI2SK = `SUBJECT#<subject>#<id>`
  *     — supports "by status" lookups.
- * These indexes are not yet provisioned in IaC (tracked separately); this module
- * only defines the item-side key shape they'd need.
+ * These indexes are provisioned in `infra/resources/database.ts` (`ExamItemsTable`'s
+ * `globalIndexes`).
  */
 
 const VERSION_PAD_LENGTH = 6;

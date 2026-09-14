@@ -569,10 +569,11 @@ diff?) — a real audit-log consumer needs to tell those apart.
   `begins_with` on `GSI1SK`) queries `GSI1`; `status` alone queries `GSI2`. With
   *no* filter there's no selective key to query, so `listItems` falls back to the
   bounded `Scan` described above — full-table listing has no way around a full-table
-  read in this design. These GSIs aren't provisioned in IaC yet — this repo's `main`
-  doesn't define the table's IaC at all yet (tracked on a separate branch) — so this
-  is app-side key design only; the `Query` calls will fail against a table lacking
-  `GSI1`/`GSI2` until that IaC lands.
+  read in this design. `GSI1`/`GSI2` are provisioned in
+  `infra/resources/database.ts` (`ExamItemsTable`'s `globalIndexes`), keyed off the
+  same `GSI1PK`/`GSI1SK`/`GSI2PK`/`GSI2SK` attribute names the app writes — this
+  landed on `mjwheatley/sst` once that branch actually defined the table's IaC (`main`
+  still has none).
 - **`MemoryStorage` asymmetry with `DynamoDBStorage`:** `MemoryStorage` keeps a
   `versions: Map<string, ExamItem[]>` (full snapshots, mirroring `VERSION#` records)
   now that `listVersions` actually reads one — this was previously simplified away

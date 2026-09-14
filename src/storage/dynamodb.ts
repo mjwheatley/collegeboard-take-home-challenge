@@ -259,8 +259,7 @@ export class DynamoDBStorage implements ItemStorage {
    * bounded Scan (see `scanAllLatestItems`) -- listing literally everything has no
    * way around a full-table read in this design.
    *
-   * Note: GSI1/GSI2 aren't provisioned in IaC yet (tracked on a separate branch);
-   * this Query will fail against a table that doesn't have them.
+   * GSI1/GSI2 are provisioned in `infra/resources/database.ts`.
    */
   async listItems(query: ListItemsQuery): Promise<{ items: ExamItem[]; total: number }> {
     const matched = await this.findMatchingLatestItems(query);
