@@ -785,3 +785,64 @@ per-file targeting.
   users, custom token-exchange endpoint vs. hosted UI — vs. API keys as a fallback) —
   deferred, leaning Cognito. Blocks giving `AuditEntry.changedBy` a real identity
   source (see "Authentication (skipped — time box)" above).
+
+## Infrastructure: AWS CDK (`mjwheatley/aws-cdk` branch)
+
+**What this branch is:** the side-by-side comparison promised in "Branching" above —
+`mjwheatley/aws-cdk` branched from `mjwheatley/sst`'s tip and replaces the SST/Pulumi
+resources with the AWS CDK equivalent, keeping the IaC-agnostic handler/middleware
+layer untouched. `sst.config.ts`, `infra/resources/*.ts` (SST versions), `tsconfig.sst.json`,
+and the `sst` dependency are removed rather than kept alongside — the two IaC
+definitions are compared via `git diff mjwheatley/sst mjwheatley/aws-cdk`, not by
+reading two copies live in the same tree.
+
+**Resource mapping**, same shapes as the SST version (`infra/resources/database.ts`,
+`infra/resources/api-gateway.ts`), just CDK constructs instead of `sst.aws.*`
+components:
+- `sst.aws.Dynamo` → `aws-cdk-lib/aws-dynamodb`'s `Table`, same `{PK, SK}` composite
+  key + sparse `GSI1`/`GSI2`, `PAY_PER_REQUEST` billing (SST's default).
+- `sst.aws.ApiGatewayV2` + `api.route(...)` → `aws-cdk-lib/aws-apigatewayv2`'s
+  `HttpApi` + `addRoutes()`, one `NodejsFunction` per route (mirrors SST's per-route
+  Lambda shape) via `aws-cdk-lib/aws-lambda-nodejs`, esbuild-bundled with no Docker
+  needed. `table.grantReadWriteData(fn)` replaces SST's `link: [table]` — same effect
+  (IAM role scoped to just that table), spelled out explicitly instead of inferred
+  from `Link.Linkable`.
+- `$app.stage`/`sst dev --stage` → a CDK context value (`--context stage=<name>`,
+  read via `app.node.tryGetContext('stage')` in `infra/cdk-app.ts`), defaulting to
+  `dev`. `resolveAccountStage`/`getStackConfiguration` (task 4/5) are unchanged —
+  they were already IaC-agnostic.
+- No offline `sst diff` equivalent needed here — `cdk synth` runs entirely locally
+  (no AWS credentials required) and was used to validate all 7 routes, both GSIs, and
+  per-function env vars against the rendered CloudFormation template.
+
+**Gotcha hit:** `cdk synth` failed with a cryptic `spawn ENOTDIR` from
+`pnpm exec -- esbuild ...` the first time — `esbuild` was only a *transitive*
+dependency (pulled in by `tsx`/`vitest`), so pnpm never linked its binary into
+`node_modules/.bin`, and `NodejsFunction`'s local (non-Docker) bundling path shells
+out to exactly that binary. Fixed by adding `esbuild` as an explicit devDependency —
+matches CDK's own documented recommendation for non-Docker bundling, not a workaround.
+
+**Losing Live Lambda — `src/server.ts` restored:** SST's `sst dev` proxies a live API
+Gateway to code running on the developer's machine; CDK has no equivalent, so the
+local dev loop needs its own HTTP server again, as it had before task 7's handler
+rework removed it (see "Task 7" above for why it was removed then — the handlers were
+about to be rebuilt against a real `APIGatewayProxyEventV2` shape anyway). The
+restored version isn't a straight revert: the old `src/server.ts` called handlers with
+ad hoc simplified args (`{ id: 'test' }`) against the pre-rework `handlers/example.ts`
+API; today's handlers (`src/handlers/items.ts`, via `createMiddyfiedRestHandler`) are
+typed and tested against a real `APIGatewayProxyEventV2`/`APIGatewayProxyStructuredResultV2`
+shape, and several middleware in that stack read specific fields off it directly
+(`corsMiddleware`'s origin/method checks, `httpHeaderNormalizer`, `@middy/http-json-body-parser`
+expecting a JSON *string* body — not a pre-parsed object — before it runs). Rather than
+adapt the handlers down to something simpler for local use (which would mean the local
+path and the deployed path run different code), the new `src/server.ts` builds a real,
+synthetic `APIGatewayProxyEventV2` from each raw Node request — `routeKey`, `rawPath`,
+`rawQueryString`, a string `body`, a `requestContext.http` block, path parameters
+matched against the same 7 route patterns the CDK stack registers — and feeds it
+straight into the unmodified Middy handler. CORS preflight (`OPTIONS`) is answered
+directly in `server.ts` rather than routed into a handler, since that's normally API
+Gateway's job (see `corsMiddleware.ts`), not something any handler-side middleware
+does. Verified against all 7 routes with `curl` (create, get, list with a filter,
+update via new version, list versions, audit trail, 404, and an `OPTIONS` preflight).
+`package.json`'s `dev`/`start` scripts point at it again (`tsx watch`/`tsx`), same as
+before task 7 removed them.

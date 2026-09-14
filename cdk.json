@@ -1,0 +1,10 @@
+{
+  "app": "npx tsx infra/cdk-app.ts",
+  "watch": {
+    "include": ["infra/**/*.ts", "src/**/*.ts"],
+    "exclude": ["**/*.test.ts", "cdk.out"]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda-nodejs:useLatestRuntimeVersion": true
+  }
+}

@@ -5,5 +5,5 @@
     "types": ["node"]
   },
   "include": ["infra/**/*.ts"],
-  "exclude": ["**/*.test.ts", "infra/resources/**"]
+  "exclude": ["**/*.test.ts"]
 }
