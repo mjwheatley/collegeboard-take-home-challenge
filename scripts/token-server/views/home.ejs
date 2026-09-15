@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Amazon Cognito authentication with Node example</title>
+</head>
+<body>
+<div style="font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem;">
+    <h1>Amazon Cognito User Pool Demo</h1>
+
+    <% if (isAuthenticated) { %>
+        <div style="background: #f4f4f4; padding: 1rem; border-radius: 8px; margin-bottom: 2rem;">
+            <h2 style="margin-top: 0;">Welcome, <%= userInfo.username || userInfo.email %></h2>
+            <p><strong>User Info:</strong></p>
+            <pre style="background: #eee; padding: 1rem; overflow: auto; border: 1px solid #ccc;"><%= JSON.stringify(userInfo, null, 4) %></pre>
+        </div>
+
+        <div style="background: #eef9ff; padding: 1rem; border-radius: 8px; border: 1px solid #bbe6ff; margin-bottom: 2rem;">
+            <h2 style="margin-top: 0;">Access Token</h2>
+            <p>Copy this token for your integration tests:</p>
+            <textarea readonly style="width: 100%; height: 120px; font-family: monospace; padding: 0.5rem; border: 1px solid #ccc; background: #fff;" onclick="this.select()"><%= accessToken %></textarea>
+            <p style="font-size: 0.85rem; color: #666;">(Click to select all)</p>
+        </div>
+
+        <div style="background: #fffbe6; padding: 1rem; border-radius: 8px; border: 1px solid #ffe58f; margin-bottom: 2rem;">
+            <h2 style="margin-top: 0;">Developer Tools</h2>
+            <p>Run the full integration test suite against the API using your current session token:</p>
+            <a href="/run-tests" target="_blank" style="display: inline-block; background: #faad14; color: #000; padding: 0.5rem 1rem; text-decoration: none; border-radius: 4px; font-weight: bold;">🚀 Run Integration Tests</a>
+        </div>
+        <br/>
+        <a href="/logout">Logout</a>
+    <% } else { %>
+        <p>Please log in to continue</p>
+        <a href="/login" style="display: inline-block; background: #007bff; color: white; padding: 0.5rem 1rem; text-decoration: none; border-radius: 4px;">Login</a>
+    <% } %>
+</div>
+</body>
+</html>

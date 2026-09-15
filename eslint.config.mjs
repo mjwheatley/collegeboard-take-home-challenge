@@ -14,6 +14,7 @@ export default defineConfig(
       "*.tsbuildinfo",
       ".sst/**",
       "sst-env.d.ts",
+      "scripts/token-server/sst-env.d.ts",
     ],
   },
   eslint.configs.recommended,
@@ -26,7 +27,7 @@ export default defineConfig(
       },
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["eslint.config.mjs", "lint-staged.config.mjs"],
+          allowDefaultProject: ["eslint.config.mjs", "lint-staged.config.mjs", "scripts/*.js", "scripts/*/*.js", "scripts/token-server/sst-env.d.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -46,7 +47,15 @@ export default defineConfig(
     },
   },
   {
+    files: ["**/*.js"],
+    rules: {
+      ...tseslintConfigs.disableTypeChecked.rules,
+      "import-x/no-extraneous-dependencies": "off",
+    },
+  },
+  {
     files: ["**/*.ts"],
+
     rules: {
       "@typescript-eslint/array-type": ["error", { default: "array" }],
       "@typescript-eslint/consistent-type-assertions": ["error", { assertionStyle: "as" }],

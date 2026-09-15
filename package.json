@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "test:integration": "node scripts/integration-test.js",
     "typecheck": "tsc --build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
