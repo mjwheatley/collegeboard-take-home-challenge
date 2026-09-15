@@ -627,40 +627,33 @@ diff?) — a real audit-log consumer needs to tell those apart.
   This is the first place AWS SDK call shapes are actually exercised, rather than just
   typechecked.
 
-## Authentication (skipped — time box)
+## Authentication
 
-**Decision (final for this submission):** Not implemented. Task 10 was explicitly
-skipped rather than rushed: session 1 landed at ~3h20m net actual work (see
-`TIME_LOG.md`), already past the brief's "1-3 hours" guidance before auth work would
-even have started. `AuditEntry.changedBy` remains a self-reported, unauthenticated
-placeholder (`metadata.author` from the request body) — a known, deliberate gap, not an
-oversight.
-
-**The shape this would have taken, if time allowed:** Cognito, with manual user
-onboarding as the *provisioning* mechanism for it (not an alternative to it) — provision
-a Cognito User Pool in IaC; onboard users manually via the AWS console (no self-service
-sign-up, avoiding a programmatic seeding step); users authenticate with
-username/password to obtain an access token (either via a custom auth endpoint that
-does the exchange, or Cognito's hosted UI) and send that token in the API's
-`Authorization` header; endpoints guarded by a Cognito authorizer (HTTP API v2 supports
-this via a JWT authorizer directly — see "API Gateway version" above — no custom
-Lambda authorizer needed). API keys were considered as a simpler fallback, but identify
-a *client*, not a *user* — insufficient for a per-user `changedBy` on audit entries, so
-Cognito was always the intended real answer, not API keys.
+**Decision:** Cognito User Pool + Client, provisioned in `infra/resources/auth.ts`,
+with a JWT authorizer attached to every route in `infra/resources/api-gateway.ts` (HTTP
+API v2 supports this directly — see "API Gateway version" above — no custom Lambda
+authorizer needed). `usernames: ['email']` makes email a sign-in alias so "forgot
+password" can target it, without making email the immutable username. Self-service
+sign-up is disabled (`adminCreateUserConfig.allowAdminCreateUserOnly`) — accounts are
+provisioned manually in the AWS console, not through a public registration flow or a
+programmatic seeding step. No Identity Pool: that component vends temporary AWS
+credentials for direct client-side AWS SDK calls, which this API has no need for — the
+authorizer only needs the User Pool's issuer URL and the Client ID as audience. API keys
+were considered as a simpler alternative, but identify a *client*, not a *user* —
+insufficient for a per-user `changedBy` on audit entries, so Cognito was always the
+intended real answer, not API keys.
 
 **Consequence for what's already built:** `actorLogMetadataMiddleware` (see "Task 7:
-full REST middleware stack") already contains the claims-extraction logic for exactly
+full REST middleware stack") already contained the claims-extraction logic for exactly
 this Cognito JWT shape (`requestContext.authorizer.jwt.claims`) — it was built to be a
-safe no-op until an authorizer exists, specifically so this gap could be closed later
-without revisiting that middleware. Closing this gap means: add the Cognito resources to
-`infra/resources/` (a new `auth.ts`, following the same one-file-per-resource pattern as
-`database.ts`/`api-gateway.ts`), attach a JWT authorizer to the routes in
-`api-gateway.ts`, and the actor metadata starts flowing automatically.
+safe no-op until an authorizer existed, specifically so this gap could be closed later
+without revisiting that middleware. With the authorizer now attached, actor metadata
+starts flowing automatically; `AuditEntry.changedBy` no longer needs to fall back to the
+self-reported `metadata.author` request-body field.
 
-**Consequence:** Until an auth mechanism lands, `AuditEntry.changedBy` has no real
-identity source to draw from — `metadata.author` on the request body is a
-self-reported, unauthenticated placeholder, not a verified caller identity. Treat any
-audit trail output before auth lands as provisional.
+**Open:** how a caller actually exchanges username/password for an access token (a
+custom auth endpoint doing the exchange, vs. Cognito's hosted UI) is not decided —
+out of scope for the IaC piece landed here.
 
 ## Linting
 

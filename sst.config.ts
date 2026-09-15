@@ -26,16 +26,20 @@ export default $config({
     const { getStackConfiguration } = await import('./infra/stack-configuration.js');
     const { createExamItemsTable } = await import('./infra/resources/database.js');
     const { createApi } = await import('./infra/resources/api-gateway.js');
+    const { createUserPool } = await import('./infra/resources/auth.js');
 
     const accountStage = resolveAccountStage($app.stage);
     const stackConfig = getStackConfiguration($app.stage);
 
     const table = createExamItemsTable();
-    const api = createApi({ table, accountStage, stackConfig });
+    const { userPool, client: userPoolClient } = createUserPool();
+    const api = createApi({ table, accountStage, stackConfig, userPool, userPoolClient });
 
     return {
       api: api.url,
       table: table.name,
+      userPoolId: userPool.id,
+      userPoolClientId: userPoolClient.id,
     };
   },
 });
