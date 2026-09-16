@@ -118,20 +118,17 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         `environment` — see `DECISIONS.md`)
   - [x] Per-stage config wired in via `StackConfiguration` (task 5) +
         `resolveAccountStage($app.stage)` (task 4)
-  - [x] Validated as far as possible without deploy access: `sst install` succeeded;
-        `sst diff --stage dev` authenticated with AWS and reached its bootstrap
-        `ssm:GetParameter` check before failing on `AccessDeniedException` (this
-        environment's credentials are Bedrock-scoped, not general AWS access — not
-        something to work around here). See `DECISIONS.md` for why there's no fully
-        offline Pulumi equivalent to `cdk synth`.
+  - [x] Validated beyond this working environment's Bedrock-scoped credentials
+        (`sst install` succeeded, `sst diff --stage dev` got as far as AWS auth before
+        `AccessDeniedException`): deployed with `sst deploy` against a real AWS account
+        and confirmed working end to end.
 
 - [x] **8. Remove `src/server.ts`** (pulled forward during task 7's handler rework —
       see `DECISIONS.md`)
   - [x] Delete `src/server.ts` and any now-unused local-server scaffolding/scripts
         (`start` script, `tsx` dependency)
-  - [ ] Confirm `sst dev` actually covers the local dev loop against a real deploy —
-        still pending an `AWS_PROFILE` with real deploy access (see pickup notes in
-        `TIME_LOG.md`); everything up to `sst diff`'s AWS auth step has been verified
+  - [x] Confirm `sst dev` actually covers the local dev loop against a real deploy —
+        confirmed against a real AWS account
 
 - [x] **9. ESLint config + pre-commit hook**
   - [x] Add `eslint.config.mjs`: `typescript-eslint` strict + stylistic type-checked base
@@ -147,24 +144,24 @@ land; add new tasks as decisions are made rather than letting scope drift undocu
         `pnpm test` all pass clean. See "Immediate lint cleanup" in `DECISIONS.md`
         for what changed and why.
 
-- [x] **10. Auth — Cognito — SKIPPED, deliberately, for time-box reasons**
-  - Session 1 landed at ~3h20m net (see `TIME_LOG.md`), already past the brief's
-    "1-3 hours" guidance before this task even started. Decided not to build it rather
-    than rush Cognito wiring (User Pool + authorizer + token exchange) in the time
-    remaining. `AuditEntry.changedBy` stays a self-reported, unauthenticated
-    placeholder — see "Authentication (skipped — time box)" in `DECISIONS.md`, which already
-    documents the intended shape if this gets picked up later.
-  - [ ] ~~Cognito User Pool in IaC~~
-  - [ ] ~~Manually onboard test user(s) via AWS console~~
-  - [ ] ~~Credential → token exchange (custom endpoint or hosted UI — TBD)~~
-  - [ ] ~~Cognito authorizer guarding the API routes~~
-  - [ ] ~~Wire real caller identity into `AuditEntry.changedBy`~~
+- [x] **10. Auth — Cognito** (originally skipped for time-box reasons at the end of
+      session 1, then picked back up as bonus work outside the timeboxed scope — see
+      `TIME_LOG.md`)
+  - [x] Cognito User Pool + Client in IaC (`infra/resources/auth.ts`)
+  - [x] Manually onboard test user(s) via AWS console — done against the real
+        deployed User Pool
+  - [x] Credential → token exchange: Cognito's hosted UI (Authorization Code + PKCE),
+        driven for local dev/testing by `scripts/token-server/` (Express + `openid-client`,
+        reads `.sst/outputs.json` for the deployed User Pool/Client IDs) — see
+        "Authentication" in `DECISIONS.md`/`ARCHITECTURE.md`
+  - [x] Cognito JWT authorizer guarding every API Gateway route
+        (`infra/resources/api-gateway.ts`)
+  - [x] Wire real caller identity into `AuditEntry.changedBy` via
+        `actorLogMetadataMiddleware`'s claims extraction
 
-- [ ] **11. `ARCHITECTURE.md`** (next up)
-  - [ ] Confirm `sst deploy`/`sst dev` actually works against a real AWS account
-        (task 8's last open item) once an `AWS_PROFILE` with real deploy access is
-        available, and that API Gateway routes actually hit the local/deployed code
-  - [ ] Write up from `DECISIONS.md`: data model + DynamoDB schema, infra
-        choices/rationale (including the SST v3 vs. CDK/Terraform deviation and the
-        auth-skip decision above), scalability, security approach, trade-offs and
-        future improvements
+- [x] **11. `ARCHITECTURE.md`**
+  - [x] Confirm `sst deploy`/`sst dev` actually works against a real AWS account
+        (task 8's last open item) — confirmed, API Gateway routes hit the deployed code
+  - [x] Write up from `DECISIONS.md`: data model + DynamoDB schema, infra
+        choices/rationale (including the SST v3 vs. CDK/Terraform deviation), auth,
+        scalability, security approach, trade-offs and future improvements
